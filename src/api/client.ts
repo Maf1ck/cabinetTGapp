@@ -1,5 +1,6 @@
 // Дані кабінету клієнта. Доступ обмежує RLS: клієнт бачить і пише лише рядки свого client_id.
 import { supabase } from '@/lib/supabase'
+import { isoDate } from '@/lib/dates'
 import type { MealType } from '@/lib/meals'
 
 type Result<T> = { data: T | null; error: unknown }
@@ -199,8 +200,5 @@ export async function getDiaryDays(clientId: string, sinceIso: string): Promise<
       .gte('taken_at', sinceIso)
       .order('taken_at', { ascending: false }),
   ) as { taken_at: string }[]
-  return rows.map((r) => {
-    const d = new Date(r.taken_at)
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  })
+  return rows.map((r) => isoDate(new Date(r.taken_at)))
 }
