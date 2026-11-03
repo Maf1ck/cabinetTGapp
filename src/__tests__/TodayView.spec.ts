@@ -4,27 +4,28 @@ import { createPinia, setActivePinia } from 'pinia'
 import TodayView from '../views/client/TodayView.vue'
 import { useAuth } from '../stores/auth'
 import { isoDate, weekday } from '../lib/dates'
+import type * as Api from '../api/client'
 
 const api = vi.hoisted(() => ({
-  getClientCard: vi.fn(),
-  getNextAppointment: vi.fn(),
-  getWater: vi.fn(),
-  getWellbeing: vi.fn(),
-  getWeekMenu: vi.fn(),
-  getShopping: vi.fn(),
-  getHabitsWeek: vi.fn(),
-  getDiaryDays: vi.fn(),
-  setWater: vi.fn(),
-  setWellbeing: vi.fn(),
-  setMealEaten: vi.fn(),
-  setShoppingChecked: vi.fn(),
-  setHabitDone: vi.fn(),
+  getClientCard: vi.fn<typeof Api.getClientCard>(),
+  getNextAppointment: vi.fn<typeof Api.getNextAppointment>(),
+  getWater: vi.fn<typeof Api.getWater>(),
+  getWellbeing: vi.fn<typeof Api.getWellbeing>(),
+  getWeekMenu: vi.fn<typeof Api.getWeekMenu>(),
+  getShopping: vi.fn<typeof Api.getShopping>(),
+  getHabitsWeek: vi.fn<typeof Api.getHabitsWeek>(),
+  getDiaryDays: vi.fn<typeof Api.getDiaryDays>(),
+  setWater: vi.fn<typeof Api.setWater>(),
+  setWellbeing: vi.fn<typeof Api.setWellbeing>(),
+  setMealEaten: vi.fn<typeof Api.setMealEaten>(),
+  setShoppingChecked: vi.fn<typeof Api.setShoppingChecked>(),
+  setHabitDone: vi.fn<typeof Api.setHabitDone>(),
 }))
 vi.mock('../api/client', () => api)
 vi.mock('../lib/supabase', () => ({ supabase: () => ({}) }))
 
 const today = new Date()
-const meal = (id: string, title: string, eaten = false) => ({
+const meal = (id: string, title: string, eaten = false): Api.Meal => ({
   id,
   day: weekday(today),
   meal: 'lunch',
