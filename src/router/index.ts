@@ -46,7 +46,7 @@ const router = createRouter({
       meta: { role: 'nutri' },
       children: [
         { path: '', name: 'nutri-overview', component: () => import('@/views/nutri/OverviewView.vue') },
-        soon('clients/:id?', 'Клієнти'),
+        { path: 'clients/:id?', name: 'nutri-clients', component: () => import('@/views/nutri/ClientsView.vue') },
         soon('diaries', 'Щоденники'),
         soon('calendar', 'Календар'),
         soon('builder', 'Конструктор меню'),
