@@ -1,0 +1,53 @@
+@use 'variables' as *;
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: $bg-app;
+  color: $text;
+  font-family: $font-body;
+  font-size: 15px;
+  line-height: 1.5;
+  // Mini App: без «гумового» скролу всієї сторінки
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+a {
+  color: $green-link;
+
+  &:hover {
+    color: $green-link-hover;
+  }
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1,
+h2 {
+  font-family: $font-heading;
+  font-weight: 600;
+}
+
+button {
+  font: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

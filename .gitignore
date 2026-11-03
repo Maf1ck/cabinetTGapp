@@ -1,0 +1,18 @@
+node_modules
+dist
+coverage
+*.local
+*.log
+*.tsbuildinfo
+.eslintcache
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# Секрети: токен бота, ключі Supabase
+.env
+.env.*
+!.env.example
+
+.vercel
