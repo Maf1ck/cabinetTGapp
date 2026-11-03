@@ -17,6 +17,7 @@ await db.exec(`
   create role authenticated nologin;
   create role service_role nologin bypassrls;
   create schema auth;
+  create table auth.users (id uuid primary key);
   create function auth.uid() returns uuid language sql stable as
     $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
   create schema storage;
@@ -38,6 +39,10 @@ await db.exec(`
 
 // Дані (від імені власника БД, RLS обходиться)
 await db.exec(`
+  insert into auth.users (id) values
+    ('00000000-0000-0000-0000-00000000000a'),
+    ('00000000-0000-0000-0000-0000000000b1'),
+    ('00000000-0000-0000-0000-0000000000b2');
   insert into users (id, telegram_id, role) values
     ('00000000-0000-0000-0000-00000000000a', 1, 'nutri'),
     ('00000000-0000-0000-0000-0000000000b1', 2, 'client'),
@@ -118,6 +123,19 @@ await as(MARIA, `update diary_entries set seen_by_nutri = true where client_id='
 check('Клієнт не може поставити «переглянуто»', (await db.query(`select count(*)::int n from diary_entries where seen_by_nutri`)).rows[0].n, 0)
 await as(NUTRI, `update diary_entries set seen_by_nutri = true where client_id='${C1}'`)
 check('Анастасія ставить «переглянуто»', (await db.query(`select count(*)::int n from diary_entries where seen_by_nutri`)).rows[0].n, 2)
+
+// Вимкнений клієнт: сесія ще жива, але даних уже не бачить
+await db.exec(`update clients set active = false where id = '${C1}'`)
+check('Вимкнена Марія не бачить свого щоденника', await count(MARIA, 'select * from diary_entries'), 0)
+check('Вимкнена Марія не бачить меню', await count(MARIA, 'select * from menus'), 0)
+const wOff = await as(MARIA, `insert into water_logs (client_id, day, glasses) values ('${C1}', '2026-11-04', 1) returning 1`)
+check('Вимкнена Марія не пише воду', typeof wOff === 'string', true)
+check('Нутриціолог і далі бачить її щоденник', await count(NUTRI, `select * from diary_entries where client_id='${C1}'`), 2)
+await db.exec(`update clients set active = true where id = '${C1}'`)
+
+// users.id мусить бути акаунтом Auth
+const orphan = await db.query(`insert into users (id, telegram_id) values (gen_random_uuid(), 99) returning 1`).catch((e) => e.message)
+check('users без акаунта Auth не створюється', typeof orphan === 'string' && orphan.includes('foreign key'), true)
 
 // Службові таблиці
 check('Клієнт не бачить invites', await count(MARIA, 'select * from invites'), 0)

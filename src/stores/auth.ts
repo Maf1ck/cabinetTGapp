@@ -1,62 +1,47 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { setAccessToken } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { telegramApp } from '@/lib/telegram'
 
 export interface Account {
   userId: string
+  telegramId: number
   role: 'client' | 'nutri'
   firstName: string | null
   clientId: string | null
 }
 
-interface Session {
-  token: string
+interface LoginResponse {
+  session: { access_token: string; refresh_token: string }
   account: Account
 }
 
-const STORAGE_KEY = 'cabinet.session'
 export const POLL_INTERVAL_MS = 2000
 // Токен входу живе 10 хв на сервері
 const POLL_TIMEOUT_MS = 10 * 60_000
 
 export type AuthError = 'no_access' | 'expired' | 'network' | null
 
-// exp із JWT, без перевірки підпису: лише щоб не тримати протухлу сесію
-function expiresAt(token: string): number {
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/')))
-    return Number(payload.exp) * 1000
-  } catch {
-    return 0
-  }
-}
-
-function loadSession(): Session | null {
-  try {
-    const s: Session = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null')
-    return s && expiresAt(s.token) > Date.now() ? s : null
-  } catch {
-    return null
-  }
-}
-
 export const useAuth = defineStore('auth', () => {
-  const session = ref<Session | null>(null)
+  const account = ref<Account | null>(null)
   const error = ref<AuthError>(null)
   const waitingBot = ref(false)
   const botUrl = ref<string | null>(null)
   let ready: Promise<void> | null = null
   let pollTimer: ReturnType<typeof setTimeout> | undefined
 
-  const account = computed(() => session.value?.account ?? null)
   const isNutri = computed(() => account.value?.role === 'nutri')
 
-  function apply(s: Session | null) {
-    session.value = s
-    setAccessToken(s?.token ?? null)
-    if (s) localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
-    else localStorage.removeItem(STORAGE_KEY)
+  async function signIn({ session, account: acc }: LoginResponse) {
+    const { error: e } = await supabase().auth.setSession(session)
+    if (e) throw e
+    account.value = acc
+    error.value = null
+  }
+
+  async function signOutLocal() {
+    account.value = null
+    await supabase().auth.signOut({ scope: 'local' }).catch(() => {})
   }
 
   async function loginWithTelegram(initData: string) {
@@ -65,46 +50,66 @@ export const useAuth = defineStore('auth', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ initData }),
     })
-    if (res.ok) {
-      apply(await res.json())
-      error.value = null
-    } else {
-      apply(null)
-      error.value = res.status === 403 ? 'no_access' : 'network'
-    }
+    if (res.ok) return signIn(await res.json())
+    await signOutLocal()
+    error.value = res.status === 403 ? 'no_access' : 'network'
   }
 
-  /** Один раз при старті: у Telegram входимо за initData, у браузері беремо збережену сесію. */
+  // Браузер: сесію зберігає supabase-js; сервер підтверджує, що доступ досі є (клієнта могли вимкнути)
+  async function restore() {
+    const { data } = await supabase().auth.getSession()
+    const token = data.session?.access_token
+    if (!token) return
+    const res = await fetch('/api/auth/me', { headers: { authorization: `Bearer ${token}` } })
+    if (res.ok) account.value = (await res.json()).account
+    else if (res.status === 403) await signOutLocal()
+    else error.value = 'network'
+  }
+
+  /** Один раз при старті: у Telegram входимо за initData, у браузері піднімаємо збережену сесію. */
   function init(): Promise<void> {
     ready ??= (async () => {
       const tg = telegramApp()
-      if (tg) {
-        tg.ready()
-        tg.expand()
-        await loginWithTelegram(tg.initData).catch(() => {
-          error.value = 'network'
-        })
-      } else {
-        apply(loadSession())
+      try {
+        if (tg) {
+          tg.ready()
+          tg.expand()
+          await loginWithTelegram(tg.initData)
+        } else {
+          await restore()
+        }
+      } catch {
+        error.value = 'network'
       }
+      // Supabase не зміг оновити сесію (відкликано, прострочено) → на екран входу
+      supabase().auth.onAuthStateChange((event) => {
+        if (event === 'SIGNED_OUT') account.value = null
+      })
     })()
     return ready
   }
 
-  /** Браузер: відкриваємо бота за одноразовим посиланням і чекаємо підтвердження. */
-  async function startBrowserLogin(openWindow: (url: string) => void = (u) => window.open(u, '_blank')) {
+  /**
+   * Браузер: відкриваємо бота за одноразовим посиланням і чекаємо підтвердження.
+   * Вкладку відкриваємо одразу по кліку, ще до запиту: інакше Safari заблокує її як спливне вікно.
+   */
+  async function startBrowserLogin(
+    openWindow: () => { location: { href: string }; close(): void } | null = () => window.open('', '_blank'),
+  ) {
     stopPolling()
     error.value = null
+    const win = openWindow()
     try {
       const res = await fetch('/api/auth/login', { method: 'POST' })
       if (!res.ok) throw new Error()
       const { token, botUrl: url } = await res.json()
       botUrl.value = url
       waitingBot.value = true
-      openWindow(url)
+      if (win) win.location.href = url
       poll(token, Date.now() + POLL_TIMEOUT_MS)
     } catch {
       error.value = 'network'
+      win?.close()
     }
   }
 
@@ -115,7 +120,7 @@ export const useAuth = defineStore('auth', () => {
         const res = await fetch(`/api/auth/login?token=${encodeURIComponent(token)}`)
         if (res.status === 202) return poll(token, deadline)
         if (res.ok) {
-          apply(await res.json())
+          await signIn(await res.json())
           return finish(null)
         }
         finish(res.status === 403 ? 'no_access' : 'expired')
@@ -135,13 +140,13 @@ export const useAuth = defineStore('auth', () => {
     waitingBot.value = false
   }
 
-  function logout() {
+  async function logout() {
     stopPolling()
-    apply(null)
+    account.value = null
+    await supabase().auth.signOut().catch(() => {})
   }
 
   return {
-    session,
     account,
     isNutri,
     error,

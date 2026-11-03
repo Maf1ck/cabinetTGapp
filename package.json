@@ -21,7 +21,6 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.50.0",
     "grammy": "^1.46.0",
-    "jose": "^6.2.15",
     "pinia": "^4.0.3",
     "vue": "^3.5.42",
     "vue-router": "^5.3.1"

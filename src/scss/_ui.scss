@@ -1,0 +1,255 @@
+// Спільні елементи кабінету (картки, кнопки, заголовки сторінок)
+@use 'variables' as *;
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  width: 100%;
+  max-width: 1240px;
+  padding: 32px;
+
+  @media (max-width: $bp-md) {
+    gap: 16px;
+    padding: 18px 14px;
+  }
+}
+
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+
+  &__sub {
+    color: $text-muted;
+
+    &::first-letter {
+      text-transform: uppercase;
+    }
+  }
+
+  &__title {
+    font-size: 36px;
+
+    @media (max-width: $bp-md) {
+      font-size: 28px;
+    }
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+}
+
+.card {
+  min-width: 0;
+  padding: 22px;
+  border: 1px solid $line;
+  border-radius: $radius-card;
+  background: $bg;
+
+  @media (max-width: $bp-md) {
+    padding: 18px;
+  }
+
+  &--dark {
+    border-color: $green-dark;
+    background: $green-dark;
+    color: #fff;
+  }
+
+  &__title {
+    font-family: $font-heading;
+    font-size: 24px;
+    font-weight: 600;
+
+    @media (max-width: $bp-md) {
+      font-size: 21px;
+    }
+  }
+
+  &__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+}
+
+.eyebrow {
+  color: $text-muted;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+
+  .card--dark & {
+    color: $badge-bg;
+  }
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 1px solid transparent;
+  border-radius: $pill;
+  font: inherit;
+  font-weight: 700;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+
+  &:focus-visible {
+    outline: 3px solid $line-green;
+    outline-offset: 2px;
+  }
+
+  &--primary {
+    background: $accent;
+    color: #fff;
+
+    &:hover:not(:disabled) {
+      background: $green-dark;
+      color: #fff;
+    }
+  }
+
+  &--ghost {
+    border-color: $line-input;
+    background: $bg;
+    color: $text;
+    font-weight: 600;
+
+    &:hover:not(:disabled) {
+      border-color: $accent;
+      color: $text;
+    }
+  }
+
+  &--soft {
+    background: $bg-active;
+    color: $text-active;
+
+    &:hover:not(:disabled) {
+      background: $bg-tint;
+      color: $text-active;
+    }
+  }
+
+  &--white {
+    background: #fff;
+    color: $text-heading;
+
+    &:hover:not(:disabled) {
+      background: $bg-soft;
+      color: $text-heading;
+    }
+  }
+
+  &--sm {
+    min-height: 38px;
+    padding: 8px 14px;
+    font-size: 14px;
+  }
+}
+
+.chip {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: $pill;
+  background: $bg-active;
+  color: $text-active;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tip {
+  padding: 12px 14px;
+  border-radius: $radius-item;
+  background: $bg-soft;
+  color: $text-nav;
+  font-size: 14px;
+
+  b {
+    color: $text;
+  }
+}
+
+.empty {
+  padding: 18px;
+  border-radius: $radius-item;
+  background: $bg-soft;
+  color: $text-muted;
+  font-size: 14px;
+  text-align: center;
+}
+
+.notice {
+  padding: 12px 14px;
+  border-radius: $radius-item;
+  background: $warn-bg;
+  color: $text-warn;
+  font-size: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: $text-nav;
+  font-size: 14px;
+
+  input,
+  textarea,
+  select {
+    min-height: 44px;
+    padding: 10px 14px;
+    border: 1px solid $line-green;
+    border-radius: $radius-item;
+    background: $bg-app;
+    color: $text;
+    font: inherit;
+    font-size: 15px;
+
+    &:focus {
+      border-color: $accent;
+      outline: none;
+    }
+  }
+}
+
+.photo-ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: $bg-tint;
+  color: $placeholder-text;
+  font-size: 13px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

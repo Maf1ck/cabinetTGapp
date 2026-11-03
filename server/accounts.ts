@@ -1,29 +1,67 @@
 // Хто і як потрапляє в кабінет. Працює з service role (в обхід RLS), тому живе лише на сервері.
+//
+// Сесії видає Supabase Auth: для кожного користувача Telegram є «тихий» акаунт auth.users
+// з технічною поштою tg<id>@telegram.invalid, без пароля. Пошта нікуди не надсилається;
+// сесію сервер бере сам (generateLink → verifyOtp), лише після перевірки Telegram.
 import { randomBytes } from 'node:crypto'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { env } from './env.js'
-import { issueSession, type AppRole } from './session.js'
 import type { TgUser } from './telegram.js'
 
 export const LOGIN_TTL_MIN = 10
 export const INVITE_TTL_DAYS = 7
 
-export const db = () =>
-  createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), {
-    auth: { persistSession: false, autoRefreshToken: false },
-  })
+const noPersist = { auth: { persistSession: false, autoRefreshToken: false } }
+
+export const db = () => createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), noPersist)
 
 export const randomCode = (bytes: number) => randomBytes(bytes).toString('base64url')
 
+export type AppRole = 'client' | 'nutri'
+
 export interface Account {
   userId: string
+  telegramId: number
   role: AppRole
   firstName: string | null
   clientId: string | null
 }
 
+export interface SessionTokens {
+  access_token: string
+  refresh_token: string
+}
+
+const techEmail = (telegramId: number) => `tg${telegramId}@telegram.invalid`
+
 // undefined-поля supabase-js не надсилає, тож порожні дані з Telegram не затирають збережені
 const profileOf = (tg: TgUser) => ({ first_name: tg.first_name, username: tg.username })
+
+async function createAuthUser(sb: SupabaseClient, tg: TgUser): Promise<string> {
+  const email = techEmail(tg.id)
+  const { data, error } = await sb.auth.admin.createUser({
+    email,
+    email_confirm: true,
+    app_metadata: { telegram_id: tg.id },
+  })
+  if (data.user) return data.user.id
+  if (error?.code !== 'email_exists') throw error
+  // Акаунт Auth лишився з попередньої спроби: беремо його id
+  const { data: link, error: le } = await sb.auth.admin.generateLink({ type: 'magiclink', email })
+  if (le) throw le
+  return link.user.id
+}
+
+async function insertUser(sb: SupabaseClient, tg: TgUser, role: AppRole) {
+  const id = await createAuthUser(sb, tg)
+  const { data, error } = await sb
+    .from('users')
+    .insert({ id, telegram_id: tg.id, role, ...profileOf(tg) })
+    .select('id, role, first_name')
+    .single()
+  if (error) throw error
+  return data
+}
 
 /**
  * Доступ мають лише Анастасія (OWNER_TG_ID, роль nutri призначається автоматично)
@@ -34,48 +72,91 @@ export async function resolveAccount(
   tg: TgUser,
   ownerId: number,
 ): Promise<Account | null> {
-  if (tg.id === ownerId) {
-    const { data, error } = await sb
-      .from('users')
-      .upsert({ telegram_id: tg.id, role: 'nutri', ...profileOf(tg) }, { onConflict: 'telegram_id' })
-      .select('id, first_name')
-      .single()
-    if (error) throw error
-    return { userId: data.id, role: 'nutri', firstName: data.first_name, clientId: null }
-  }
+  // Нутриціолог лише один: той, чий ID зараз в OWNER_TG_ID. Якщо його змінили (тести),
+  // попередній власник втрачає права одразу: RLS дивиться на users.role, а не на сесію.
+  const { error: de } = await sb
+    .from('users')
+    .update({ role: 'client' })
+    .eq('role', 'nutri')
+    .neq('telegram_id', ownerId)
+  if (de) throw de
 
-  const { data: user, error } = await sb
+  const { data: found, error } = await sb
     .from('users')
     .select('id, role, first_name')
     .eq('telegram_id', tg.id)
     .maybeSingle()
   if (error) throw error
-  if (!user) return null
 
-  let clientId: string | null = null
-  if (user.role === 'client') {
-    const { data: client, error: e } = await sb
-      .from('clients')
-      .select('id, active')
-      .eq('user_id', user.id)
-      .maybeSingle()
-    if (e) throw e
-    if (!client?.active) return null
-    clientId = client.id
+  if (tg.id === ownerId) {
+    const user = found ?? (await insertUser(sb, tg, 'nutri'))
+    const { error: ue } = await sb
+      .from('users')
+      .update({ role: 'nutri', ...profileOf(tg) })
+      .eq('id', user.id)
+    if (ue) throw ue
+    return {
+      userId: user.id,
+      telegramId: tg.id,
+      role: 'nutri',
+      firstName: tg.first_name ?? user.first_name,
+      clientId: null,
+    }
   }
 
-  if (tg.first_name || tg.username) await sb.from('users').update(profileOf(tg)).eq('id', user.id)
+  if (!found) return null
+  const { data: client, error: ce } = await sb
+    .from('clients')
+    .select('id, active')
+    .eq('user_id', found.id)
+    .maybeSingle()
+  if (ce) throw ce
+  if (!client?.active) return null
+
+  if (tg.first_name || tg.username) await sb.from('users').update(profileOf(tg)).eq('id', found.id)
   return {
-    userId: user.id,
-    role: user.role,
-    firstName: tg.first_name ?? user.first_name,
-    clientId,
+    userId: found.id,
+    telegramId: tg.id,
+    role: 'client',
+    firstName: tg.first_name ?? found.first_name,
+    clientId: client.id,
   }
 }
 
-export async function sessionResponse(account: Account): Promise<Response> {
-  const token = await issueSession(account.userId, account.role, env('SUPABASE_JWT_SECRET'))
-  return Response.json({ token, account })
+/** Сесія Supabase Auth для вже перевіреного користувача. */
+export async function issueSession(sb: SupabaseClient, telegramId: number): Promise<SessionTokens> {
+  const { data, error } = await sb.auth.admin.generateLink({
+    type: 'magiclink',
+    email: techEmail(telegramId),
+  })
+  if (error) throw error
+  const anon = createClient(env('SUPABASE_URL'), env('VITE_SUPABASE_ANON_KEY'), noPersist)
+  const { data: verified, error: ve } = await anon.auth.verifyOtp({
+    token_hash: data.properties.hashed_token,
+    type: 'magiclink',
+  })
+  if (ve) throw ve
+  if (!verified.session) throw new Error('Supabase не видав сесію')
+  const { access_token, refresh_token } = verified.session
+  return { access_token, refresh_token }
+}
+
+export async function sessionResponse(sb: SupabaseClient, account: Account): Promise<Response> {
+  return Response.json({ session: await issueSession(sb, account.telegramId), account })
+}
+
+/** Хто стоїть за access token сайту; null, якщо токен недійсний або доступ відкликано. */
+export async function accountFromToken(
+  sb: SupabaseClient,
+  token: string,
+  ownerId: number,
+): Promise<Account | null> {
+  if (!token) return null
+  const { data, error } = await sb.auth.getUser(token)
+  if (error || !data.user) return null
+  const { data: user } = await sb.from('users').select('telegram_id').eq('id', data.user.id).maybeSingle()
+  if (!user) return null
+  return resolveAccount(sb, { id: Number(user.telegram_id) }, ownerId)
 }
 
 // ---------------------------------------------------------------- вхід з браузера
@@ -85,6 +166,8 @@ export async function createLoginToken(sb: SupabaseClient): Promise<string> {
   const expires = new Date(Date.now() + LOGIN_TTL_MIN * 60_000).toISOString()
   const { error } = await sb.from('login_tokens').insert({ token, expires_at: expires })
   if (error) throw error
+  // Прибираємо мертві токени заодно, окремий крон для цього не потрібен
+  await sb.from('login_tokens').delete().lt('expires_at', new Date(Date.now() - 86_400_000).toISOString())
   return token
 }
 
@@ -188,13 +271,7 @@ export async function acceptInvite(
     if (linked) return { ok: false, reason: 'already_client' }
     userId = existing.id
   } else {
-    const { data: created, error } = await sb
-      .from('users')
-      .insert({ telegram_id: tg.id, role: 'client', ...profileOf(tg) })
-      .select('id')
-      .single()
-    if (error) throw error
-    userId = created.id
+    userId = (await insertUser(sb, tg, 'client')).id
   }
 
   // Запрошення гаситься атомарно: два одночасні кліки не прив'яжуть два акаунти

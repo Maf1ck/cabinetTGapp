@@ -11,8 +11,9 @@ export async function POST(req: Request): Promise<Response> {
   const tg = verifyInitData(initData, env('TELEGRAM_BOT_TOKEN'))
   if (!tg) return Response.json({ error: 'bad_init_data' }, { status: 401 })
 
-  const account = await resolveAccount(db(), tg, ownerTgId())
+  const sb = db()
+  const account = await resolveAccount(sb, tg, ownerTgId())
   if (!account) return Response.json({ error: 'no_access' }, { status: 403 })
 
-  return sessionResponse(account)
+  return sessionResponse(sb, account)
 }

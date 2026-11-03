@@ -27,15 +27,17 @@ pnpm lint
 
 ### 2. Supabase
 1. Створити проєкт на supabase.com (регіон ближче до України, напр. Frankfurt).
-2. SQL Editor → вставити й виконати `supabase/migrations/0001_schema.sql`.
-3. Settings → **General**: Project URL; **API Keys**: anon/publishable і service_role/secret;
-   **JWT Keys → Legacy JWT Secret**: секрет для підпису сесій.
-4. Роль `nutri` Анастасія отримує автоматично при першому вході (за `OWNER_TG_ID`).
+2. SQL Editor → виконати по черзі всі файли з `supabase/migrations/` (`0001_…`, `0002_…`).
+3. Settings → **General**: Project URL (`https://<ref>.supabase.co`, не адреса панелі);
+   **API Keys**: anon/publishable і service_role/secret.
+4. Authentication → Sign In / Providers → **вимкнути «Allow new users to sign up»**:
+   акаунти створює лише наш сервер.
+5. Роль `nutri` Анастасія отримує автоматично при першому вході (за `OWNER_TG_ID`).
 
 ### 3. Змінні середовища
 Скопіювати `.env.example` в `.env` (локально) і додати ті самі змінні у Vercel → Settings → Environment Variables.
 `VITE_*` у Vercel ставимо типом **Config** (вони публічні), решту секретів **Sensitive**.
-`SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `TELEGRAM_BOT_TOKEN` ніколи не мають
+`SUPABASE_SERVICE_ROLE_KEY` і `TELEGRAM_BOT_TOKEN` ніколи не мають
 префікса `VITE_`, інакше потраплять у браузер.
 
 ### 4. Після першого деплою
@@ -45,16 +47,18 @@ pnpm bot:setup https://<адреса-кабінету>   # вебхук, кно�
 Потім у @BotFather → Bot Settings → Configure Mini App вказати ту саму адресу.
 
 ## Локальна розробка
-`pnpm dev` запускає лише фронтенд, `/api/*` там немає. Повністю, з функціями:
 ```sh
-pnpm dlx vercel dev
+pnpm dev       # сайт + /api/* (плагін build/dev-api.ts виконує api/ так само, як Vercel)
+pnpm bot:dev   # бот локально, long polling
 ```
+`pnpm bot:dev` знімає вебхук, тож після нього на проді знову виконати `pnpm bot:setup <адреса>`.
 
 ## API (Vercel-функції)
 
 | Маршрут | Що робить |
 |---|---|
-| `POST /api/auth/telegram` | `{ initData }` з Mini App → перевірка підпису → `{ token, account }` |
+| `POST /api/auth/telegram` | `{ initData }` з Mini App → перевірка підпису → `{ session, account }` |
+| `GET /api/auth/me` | чи збережена сесія досі має доступ (клієнта могли вимкнути) |
 | `POST /api/auth/login` | вхід з браузера: одноразовий токен і посилання на бота |
 | `GET /api/auth/login?token=` | опитування: 202 поки чекаємо, 200 + сесія після підтвердження в боті |
 | `POST /api/invites` | лише нутриціолог: `{ clientId }` → посилання-запрошення на 7 днів |
@@ -67,8 +71,11 @@ pnpm dlx vercel dev
 
 - Користувач = рядок у `public.users` за `telegram_id`.
 - Реєстрації немає: клієнта створює Анастасія, клієнт приймає запрошення `t.me/<bot>?start=inv_<код>`.
-- Сервер видає JWT із `sub = users.id`; Supabase RLS пропускає клієнта лише до його рядків,
-  нутриціолога до всіх.
+- Сесії видає Supabase Auth: для кожного користувача є «тихий» акаунт `auth.users`
+  (`tg<id>@telegram.invalid`, без пароля, пошта не надсилається), `users.id = auth.users.id`.
+  Сервер бере сесію сам (`generateLink` → `verifyOtp`) лише після перевірки Telegram.
+- RLS пропускає клієнта лише до його рядків і лише поки картка `active`, нутриціолога до всіх.
+- Нутриціолог лише той, чий ID зараз в `OWNER_TG_ID`: при зміні попередній одразу стає клієнтом.
 - `login_tokens`, `invites`, `notifications` без політик: доступні лише серверу (service role).
 - Фото й аналізи в приватних бакетах, шлях `<client_id>/<файл>`.
 

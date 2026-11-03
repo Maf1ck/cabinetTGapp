@@ -1,10 +1,9 @@
 -- Кабінет нутриціолога: схема, RLS і сховище.
 --
 -- Модель доступу:
---   * Користувачі живуть у public.users (Telegram ID), а не в auth.users.
---   * Після входу через Telegram сервер (api/) видає JWT, підписаний секретом
---     Supabase: sub = users.id, role = 'authenticated'. Тому auth.uid() у RLS
---     повертає наш users.id.
+--   * Користувачі живуть у public.users (Telegram ID). З 0002 кожен має «тихий»
+--     акаунт auth.users з тим самим id: сервер створює його і видає сесію
+--     Supabase Auth, тож auth.uid() у RLS повертає наш users.id.
 --   * Роль нутриціолога (Анастасія) визначається полем users.role. Клієнт бачить
 --     лише рядки зі своїм client_id.
 --   * Таблиці без політик (login_tokens, invites, notifications) доступні лише
