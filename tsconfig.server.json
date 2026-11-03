@@ -1,0 +1,14 @@
+// Vercel-функції (api/) і спільний серверний код (server/)
+{
+  "extends": "@tsconfig/node24/tsconfig.json",
+  "include": ["api/**/*", "server/**/*", "scripts/**/*.ts"],
+  "exclude": ["server/**/__tests__/*"],
+  "compilerOptions": {
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "noUncheckedIndexedAccess": true,
+    "types": ["node"],
+    "noEmit": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.server.tsbuildinfo"
+  }
+}
