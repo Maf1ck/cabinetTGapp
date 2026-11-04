@@ -16,6 +16,7 @@
     "format": "prettier --write --experimental-cli src/",
     "test:db": "node supabase/tests/rls.mjs",
     "bot:setup": "node --env-file=.env scripts/bot-setup.mjs",
+    "recipes:import": "tsx --env-file=.env scripts/recipes-import.ts",
     "bot:dev": "tsx --env-file=.env scripts/bot-dev.ts"
   },
   "dependencies": {
@@ -45,6 +46,7 @@
     "oxlint": "~1.82.0",
     "prettier": "3.9.6",
     "pug": "^3.0.4",
+    "read-excel-file": "^9.3.14",
     "sass": "^1.107.1",
     "tsx": "^4.23.15",
     "typescript": "~6.0.0",

@@ -9,6 +9,7 @@ declare module 'vue-router' {
 }
 
 const SoonView = () => import('@/views/SoonView.vue')
+const RecipesView = () => import('@/views/RecipesView.vue')
 const soon = (path: string, title: string): RouteRecordRaw => ({
   path,
   component: SoonView,
@@ -35,7 +36,7 @@ const router = createRouter({
         { path: 'menu', name: 'client-menu', component: () => import('@/views/client/MenuView.vue') },
         { path: 'diary', name: 'client-diary', component: () => import('@/views/client/DiaryView.vue') },
         soon('shop', 'Список покупок'),
-        soon('recipes', 'Рецепти'),
+        { path: 'recipes/:id?', name: 'client-recipes', component: RecipesView },
         soon('tests', 'Мої аналізи'),
         soon('chat', 'Чат з нутриціологом'),
       ],
@@ -50,7 +51,7 @@ const router = createRouter({
         soon('diaries', 'Щоденники'),
         { path: 'calendar', name: 'nutri-calendar', component: () => import('@/views/nutri/CalendarView.vue') },
         { path: 'builder', name: 'nutri-builder', component: () => import('@/views/nutri/BuilderView.vue') },
-        soon('recipes', 'База рецептів'),
+        { path: 'recipes/:id?', name: 'nutri-recipes', component: RecipesView },
         soon('payments', 'Оплати'),
       ],
     },

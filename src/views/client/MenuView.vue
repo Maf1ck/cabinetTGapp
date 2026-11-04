@@ -51,10 +51,12 @@ function setWeek(d: Date) {
 const shiftWeek = (delta: number) => setWeek(addDays(monday.value, delta * 7))
 const goThisWeek = () => setWeek(thisMonday)
 
-const cellTitle = (m: Meal) =>
-  m.eaten ? 'Зʼїдено — натисніть, щоб зняти відмітку' : 'Натисніть, щоб відмітити зʼїденим'
+// Шаблон pug у dev іде як чистий JS — без `!`/`as`, тому приймаємо й undefined
+const cellTitle = (m: Meal | undefined) =>
+  m?.eaten ? 'Зʼїдено — натисніть, щоб зняти відмітку' : 'Натисніть, щоб відмітити зʼїденим'
 
-async function toggle(meal: Meal) {
+async function toggle(meal: Meal | undefined) {
+  if (!meal) return
   meal.eaten = !meal.eaten
   saveError.value = false
   try {
@@ -104,16 +106,19 @@ main.page.menu
           template(v-for='t in rows' :key='t')
             .menu__meal-type {{ MEAL_LABEL[t] }}
             template(v-for='d in weekDays' :key='`${t}-${d.day}`')
-              button.menu__cell(
-                v-if='cell(d.day, t)'
-                type='button'
-                :class='{ "menu__cell--today": d.today, "is-eaten": cell(d.day, t)!.eaten }'
-                :aria-pressed='cell(d.day, t)!.eaten'
-                :title='cellTitle(cell(d.day, t)!)'
-                @click='toggle(cell(d.day, t)!)'
-              )
-                span {{ cell(d.day, t)!.title }}
-                AppIcon(v-if='cell(d.day, t)!.eaten' name='check' :size='16')
+              .menu__slot(v-if='cell(d.day, t)')
+                button.menu__cell(
+                  type='button'
+                  :class='{ "menu__cell--today": d.today, "is-eaten": cell(d.day, t)?.eaten }'
+                  :aria-pressed='!!cell(d.day, t)?.eaten'
+                  :title='cellTitle(cell(d.day, t))'
+                  @click='toggle(cell(d.day, t))'
+                )
+                  span {{ cell(d.day, t)?.title }}
+                  AppIcon(v-if='cell(d.day, t)?.eaten' name='check' :size='16')
+                RouterLink.menu__recipe(v-if='cell(d.day, t)?.recipe_id' :to='`/c/recipes/${cell(d.day, t)?.recipe_id}`')
+                  AppIcon(name='book' :size='14')
+                  | Рецепт
               .menu__cell.menu__cell--empty(v-else) —
 
       //- телефон: день за днем
@@ -131,12 +136,16 @@ main.page.menu
             span {{ DAY_SHORT[d.day - 1] }}
             b {{ d.date.getDate() }}
         p.empty(v-if='!dayMeals.length') На цей день страв немає.
-        button.menu__item(v-for='m in dayMeals' :key='m.id' type='button' :class='{ "is-eaten": m.eaten }' :aria-pressed='m.eaten' @click='toggle(m)')
-          span.menu__item-text
-            span.menu__item-type {{ MEAL_LABEL[m.meal] }}{{ m.at_time ? ` · ${hhmm(m.at_time)}` : '' }}
-            b {{ m.title }}
-          span.menu__tick
-            AppIcon(name='check' :size='16')
+        .menu__slot(v-for='m in dayMeals' :key='m.id')
+          button.menu__item(type='button' :class='{ "is-eaten": m.eaten }' :aria-pressed='m.eaten' @click='toggle(m)')
+            span.menu__item-text
+              span.menu__item-type {{ MEAL_LABEL[m.meal] }}{{ m.at_time ? ` · ${hhmm(m.at_time)}` : '' }}
+              b {{ m.title }}
+            span.menu__tick
+              AppIcon(name='check' :size='16')
+          RouterLink.menu__recipe(v-if='m.recipe_id' :to='`/c/recipes/${m.recipe_id}`')
+            AppIcon(name='book' :size='14')
+            | Рецепт: {{ m.title }}
 
   .menu__row
     section.card.menu__plate
@@ -247,6 +256,33 @@ main.page.menu
       &:hover {
         border-color: transparent;
       }
+    }
+  }
+
+  &__slot {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    > .menu__cell,
+    > .menu__item {
+      flex: 1;
+    }
+  }
+
+  &__recipe {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    gap: 4px;
+    padding: 2px 4px;
+    color: $green-link;
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
     }
   }
 

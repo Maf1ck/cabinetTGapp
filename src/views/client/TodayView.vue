@@ -269,6 +269,9 @@ main.page.today
           .today__meal-body
             .today__meal-type {{ MEAL_LABEL[m.meal] }}{{ m.at_time ? ` · ${hhmm(m.at_time)}` : '' }}{{ m.id === currentMealId ? ' · зараз' : '' }}
             b {{ m.title }}
+            RouterLink.today__recipe(v-if='m.recipe_id' :to='`/c/recipes/${m.recipe_id}`')
+              AppIcon(name='book' :size='14')
+              | Як приготувати
             button.today__eaten(type='button' :class='{ "is-on": m.eaten }' :aria-pressed='m.eaten' @click='toggleMeal(m)')
               AppIcon(v-if='m.eaten' name='check' :size='16')
               | {{ m.eaten ? "З'їдено" : "Відмітити з'їденим" }}
@@ -475,6 +478,20 @@ main.page.today
     align-items: flex-start;
     gap: 4px;
     padding: 14px;
+  }
+
+  &__recipe {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: $green-link;
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
   }
 
   &__meal-type {

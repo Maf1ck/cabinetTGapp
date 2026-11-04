@@ -183,6 +183,7 @@ export interface EditableMeal {
   meal: MealType
   at_time: string | null
   title: string
+  recipe_id: string | null
 }
 
 export interface EditableMenu {
@@ -191,7 +192,7 @@ export interface EditableMenu {
   meals: EditableMeal[]
 }
 
-const MEAL_FIELDS = 'id, day, meal, at_time, title'
+const MEAL_FIELDS = 'id, day, meal, at_time, title, recipe_id'
 
 /** Меню клієнта на тиждень разом із чернеткою (нутриціолог бачить і неопубліковані). */
 export async function getMenuForEdit(clientId: string, weekStart: string): Promise<EditableMenu | null> {
@@ -228,7 +229,14 @@ export async function saveMeal(
   menuId: string,
   meal: Omit<EditableMeal, 'id'> & { id?: string },
 ): Promise<EditableMeal> {
-  const row = { menu_id: menuId, day: meal.day, meal: meal.meal, at_time: meal.at_time, title: meal.title }
+  const row = {
+    menu_id: menuId,
+    day: meal.day,
+    meal: meal.meal,
+    at_time: meal.at_time,
+    title: meal.title,
+    recipe_id: meal.recipe_id,
+  }
   const table = supabase().from('menu_meals')
   return must(
     meal.id
@@ -254,7 +262,16 @@ export async function copyMenu(clientId: string, fromWeek: string, toWeek: strin
   const meals = must(
     await supabase()
       .from('menu_meals')
-      .insert(source.meals.map(({ day, meal, at_time, title }) => ({ menu_id: target.id, day, meal, at_time, title })))
+      .insert(
+        source.meals.map(({ day, meal, at_time, title, recipe_id }) => ({
+          menu_id: target.id,
+          day,
+          meal,
+          at_time,
+          title,
+          recipe_id,
+        })),
+      )
       .select(MEAL_FIELDS),
   ) as EditableMeal[]
   return { ...target, meals }

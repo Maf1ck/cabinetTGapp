@@ -169,6 +169,8 @@ async function makeInvite() {
   }
 }
 
+const selectAll = (e: FocusEvent) => (e.target as HTMLInputElement).select()
+
 async function copyInvite() {
   if (!invite.value) return
   try {
@@ -274,7 +276,7 @@ main.page.clients
         b Запросіть клієнта в кабінет
         p.clients__muted Посилання одноразове і діє 7 днів. Надішліть його клієнту в Telegram або Viber.
         .clients__link(v-if='invite?.clientId === selected.id')
-          input(:value='invite.link' readonly aria-label='Посилання-запрошення' @focus='($event.target as HTMLInputElement).select()')
+          input(:value='invite.link' readonly aria-label='Посилання-запрошення' @focus='selectAll')
           button.btn.btn--soft(type='button' @click='copyInvite')
             AppIcon(:name='copied ? "check" : "copy"' :size='18')
             | {{ copied ? 'Скопійовано' : 'Копіювати' }}
