@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useAuth } from '@/stores/auth'
+import DiaryEntryModal from '@/components/DiaryEntryModal.vue'
 import {
-  addDiaryComment,
   countUnseenDiary,
   diaryDaysByClient,
   getSchedule,
   listClients,
   listUnseenDiary,
-  markDiarySeen,
   paidSumSince,
   type ClientRow,
   type DiaryItem,
@@ -18,9 +16,6 @@ import { addDays, days, fromIso, longDate, streak, timeOf } from '@/lib/dates'
 import { MEAL_LABEL } from '@/lib/meals'
 import { programLabel, shortName } from '@/lib/clients'
 
-const TEMPLATES = ['Чудова тарілка!', 'Додайте овочів — і буде ідеально.', 'Гарний баланс білка й клітковини.']
-
-const auth = useAuth()
 const now = new Date()
 const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
 const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
@@ -36,10 +31,9 @@ const income = ref(0)
 const diaryDays = ref(new Map<string, string[]>())
 const search = ref('')
 
-const selected = ref<DiaryItem | null>(null)
-const comment = ref('')
-const sending = ref(false)
-const sendError = ref(false)
+/** індекс відкритого запису у вікні перегляду */
+const opened = ref<number | null>(null)
+const openedEntry = computed(() => (opened.value === null ? null : (unseen.value[opened.value] ?? null)))
 
 const active = computed(() => clients.value.filter((c) => c.active))
 const shown = computed(() => {
@@ -82,7 +76,6 @@ async function load() {
     unseenCount.value = n
     income.value = p
     diaryDays.value = d
-    selected.value = u[0] ?? null
   } catch {
     loadError.value = true
   } finally {
@@ -90,34 +83,17 @@ async function load() {
   }
 }
 
-async function send(body = comment.value.trim()) {
-  const entry = selected.value
-  if (!entry || !body || !auth.account) return
-  sending.value = true
-  sendError.value = false
-  try {
-    await addDiaryComment(entry.id, auth.account.userId, body)
-    await markDiarySeen(entry.id)
-    unseen.value = unseen.value.filter((e) => e.id !== entry.id)
-    unseenCount.value = Math.max(0, unseenCount.value - 1)
-    selected.value = unseen.value[0] ?? null
-    comment.value = ''
-  } catch {
-    sendError.value = true
-  } finally {
-    sending.value = false
-  }
+function step(d: number) {
+  if (opened.value === null) return
+  opened.value = Math.min(unseen.value.length - 1, Math.max(0, opened.value + d))
 }
 
-async function seen(entry: DiaryItem) {
-  try {
-    await markDiarySeen(entry.id)
-    unseen.value = unseen.value.filter((e) => e.id !== entry.id)
-    unseenCount.value = Math.max(0, unseenCount.value - 1)
-    if (selected.value?.id === entry.id) selected.value = unseen.value[0] ?? null
-  } catch {
-    sendError.value = true
-  }
+function reviewed(entry: DiaryItem) {
+  const i = unseen.value.findIndex((e) => e.id === entry.id)
+  unseen.value = unseen.value.filter((e) => e.id !== entry.id)
+  unseenCount.value = Math.max(0, unseenCount.value - 1)
+  // далі — наступний запис на тому ж місці, поки є
+  opened.value = unseen.value.length ? Math.min(i, unseen.value.length - 1) : null
 }
 
 onMounted(load)
@@ -171,30 +147,21 @@ main.page.overview
           span.chip(v-if='unseenCount') {{ unseenCount }} непереглянутих
         p.empty(v-if='!unseen.length') Усі записи переглянуто 🌿
         template(v-else)
+          p.overview__hint Натисніть на запис, щоб побачити все, що надіслав клієнт, і відповісти.
           .overview__photos
             button.overview__photo(
-              v-for='e in unseen'
+              v-for='(e, i) in unseen'
               :key='e.id'
               type='button'
-              :class='{ "is-on": selected?.id === e.id }'
-              :aria-pressed='selected?.id === e.id'
-              @click='selected = e'
+              :aria-label='`Відкрити запис: ${e.client ? e.client.full_name : "клієнт"}`'
+              @click='opened = i'
             )
               img(v-if='e.photoUrl' :src='e.photoUrl' :alt='`Фото: ${e.meal ? MEAL_LABEL[e.meal] : "прийом їжі"}`' loading='lazy')
               .photo-ph(v-else) {{ e.note ? 'Нотатка' : 'Фото' }}
               span.overview__photo-cap
                 b {{ e.client ? shortName(e.client.full_name) : 'Клієнт' }}
                 span {{ e.meal ? MEAL_LABEL[e.meal] : 'Запис' }} · {{ timeOf(new Date(e.taken_at)) }}
-          template(v-if='selected')
-            p.overview__note(v-if='selected.note') «{{ selected.note }}»
-            label.field
-              | Коментар для {{ selected.client ? shortName(selected.client.full_name) : 'клієнта' }}
-              textarea(v-model='comment' rows='2' placeholder='Напишіть відгук на прийом їжі…')
-            p.notice(v-if='sendError' role='alert') Не вдалося зберегти. Спробуйте ще раз.
-            .overview__actions
-              button.btn.btn--primary(type='button' :disabled='sending || !comment.trim()' @click='send()') Надіслати
-              button.btn.btn--ghost(v-for='t in TEMPLATES' :key='t' type='button' :disabled='sending' @click='send(t)') «{{ t }}»
-              button.btn.btn--soft(type='button' :disabled='sending' @click='seen(selected)') Переглянуто без коментаря
+          p.overview__hint(v-if='unseenCount > unseen.length') Показано {{ unseen.length }} з {{ unseenCount }} — решта зʼявиться, щойно ці переглянете.
 
     section.card
       .card__head
@@ -222,6 +189,17 @@ main.page.overview
               td {{ programLabel(c) || '—' }}
               td(:class='{ "is-warn": diaryStatus(c).warn }') {{ diaryStatus(c).text }}
               td: RouterLink(:to='`/n/clients/${c.id}`') {{ c.user_id ? 'Картка' : 'Запросити' }}
+
+  DiaryEntryModal(
+    v-if='openedEntry && opened !== null'
+    :entry='openedEntry'
+    :index='opened'
+    :total='unseen.length'
+    @close='opened = null'
+    @prev='step(-1)'
+    @next='step(1)'
+    @reviewed='reviewed'
+  )
 </template>
 
 <style lang="scss">
@@ -333,8 +311,16 @@ main.page.overview
     text-align: left;
     cursor: pointer;
 
-    &.is-on {
-      border: 2px solid $accent;
+    transition:
+      border-color 0.15s,
+      box-shadow 0.15s,
+      transform 0.15s;
+
+    &:hover,
+    &:focus-visible {
+      border-color: $accent;
+      box-shadow: 0 6px 18px rgba(20, 38, 27, 0.12);
+      transform: translateY(-2px);
     }
 
     img,
@@ -357,15 +343,10 @@ main.page.overview
     }
   }
 
-  &__note {
-    color: $text-nav;
-    font-style: italic;
-  }
-
-  &__actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+  &__hint {
+    margin: 0;
+    color: $text-faint;
+    font-size: 13px;
   }
 
   &__search input {

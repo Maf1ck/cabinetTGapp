@@ -1,7 +1,7 @@
 // Розбір таблиці рецептів (recipes_db.xlsx) у рядки бази. Чиста логіка без IO —
 // її тестуємо; читання файла й запис у Supabase — у scripts/recipes-import.ts.
 import { createHash } from 'node:crypto'
-import { formatAmount } from '../src/lib/recipes.js'
+import { formatAmount, normalize } from '../src/lib/recipes.js'
 
 export type Cell = string | number | boolean | null | unknown
 export type Sheet = Cell[][]
@@ -187,4 +187,128 @@ export function buildCatalog(sheets: Record<string, Sheet>): Catalog {
   })
 
   return { ingredients: ingredients.map((i) => i.row), recipes: [...recipeByKey.values()], lines, toReview }
+}
+
+// ------------------------------------------------------------------ злиття з базою
+// Нова таблиця нумерує рядки з 1, як і попередня, тож id з файла нічого не означають для бази.
+// Звіряємо за назвою (без регістру й апострофів) і синонімами.
+
+export interface Existing {
+  ingredients: { id: string; name: string; aliases: string[] }[]
+  recipes: { id: string; title: string; aliases: string[] }[]
+}
+
+export interface PlannedRecipe {
+  row: RecipeRow
+  /** new — нема в базі; existing — уже є (row.id = id з бази) */
+  status: 'new' | 'existing'
+  existingTitle?: string
+}
+
+export interface MergePlan {
+  newIngredients: IngredientRow[]
+  /** знайдені в базі інгредієнти, яким додаємо назви з нової таблиці як синоніми */
+  ingredientAliases: { id: string; name: string; aliases: string[] }[]
+  matchedIngredients: number
+  recipes: PlannedRecipe[]
+  /** однакові назви всередині самого файла — береться перша */
+  duplicatesInFile: string[]
+  lines: RecipeLineRow[]
+}
+
+const uniq = (xs: string[]) => {
+  const seen = new Set<string>()
+  return xs.filter((x) => {
+    const k = normalize(x)
+    if (!k || seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
+}
+
+export function planMerge(catalog: Catalog, existing: Existing): MergePlan {
+  // ---- інгредієнти
+  const dbIngredient = new Map<string, Existing['ingredients'][number]>()
+  for (const i of existing.ingredients) for (const n of [i.name, ...i.aliases]) dbIngredient.set(normalize(n), i)
+
+  const ingredientId = new Map<string, { id: string; name: string }>() // id з файла → у базі
+  const newIngredients: IngredientRow[] = []
+  const newByKey = new Map<string, IngredientRow>()
+  const aliasAdds = new Map<string, { id: string; name: string; aliases: string[] }>()
+  let matchedIngredients = 0
+
+  for (const ing of catalog.ingredients) {
+    const names = [ing.name, ...ing.aliases]
+    const found = names.map((n) => dbIngredient.get(normalize(n))).find(Boolean)
+    if (found) {
+      matchedIngredients++
+      ingredientId.set(ing.id, { id: found.id, name: found.name })
+      const extra = names.filter((n) => !dbIngredient.has(normalize(n)))
+      if (extra.length) {
+        const entry = aliasAdds.get(found.id) ?? { id: found.id, name: found.name, aliases: [...found.aliases] }
+        entry.aliases = uniq([...entry.aliases, ...extra])
+        aliasAdds.set(found.id, entry)
+        for (const n of extra) dbIngredient.set(normalize(n), found)
+      }
+      continue
+    }
+    const key = normalize(ing.name)
+    const twin = newByKey.get(key)
+    if (twin) {
+      twin.aliases = uniq([...twin.aliases, ...ing.aliases])
+      ingredientId.set(ing.id, { id: twin.id, name: twin.name })
+      continue
+    }
+    const row = { ...ing, id: stableId(`ingredient-name:${key}`) }
+    newIngredients.push(row)
+    newByKey.set(key, row)
+    for (const n of names) newByKey.set(normalize(n), row)
+    ingredientId.set(ing.id, { id: row.id, name: row.name })
+  }
+
+  // ---- рецепти
+  const dbRecipe = new Map<string, Existing['recipes'][number]>()
+  for (const r of existing.recipes) for (const n of [r.title, ...r.aliases]) dbRecipe.set(normalize(n), r)
+
+  const recipeId = new Map<string, string>() // id з файла → у базі
+  const recipes: PlannedRecipe[] = []
+  const inFile = new Set<string>()
+  const duplicatesInFile: string[] = []
+
+  for (const r of catalog.recipes) {
+    const key = normalize(r.title)
+    if (inFile.has(key)) {
+      duplicatesInFile.push(r.title)
+      continue
+    }
+    inFile.add(key)
+    const found = dbRecipe.get(key)
+    if (found) {
+      recipeId.set(r.id, found.id)
+      recipes.push({
+        row: { ...r, id: found.id, aliases: uniq([...found.aliases, ...r.aliases]) },
+        status: 'existing',
+        existingTitle: found.title,
+      })
+    } else {
+      const id = stableId(`recipe-title:${key}`)
+      recipeId.set(r.id, id)
+      recipes.push({ row: { ...r, id }, status: 'new' })
+    }
+  }
+
+  const lines = catalog.lines.flatMap((l) => {
+    const rid = recipeId.get(l.recipe_id)
+    const ing = ingredientId.get(l.ingredient_id)
+    return rid && ing ? [{ ...l, recipe_id: rid, ingredient_id: ing.id, name: ing.name }] : []
+  })
+
+  return {
+    newIngredients,
+    ingredientAliases: [...aliasAdds.values()],
+    matchedIngredients,
+    recipes,
+    duplicatesInFile,
+    lines,
+  }
 }

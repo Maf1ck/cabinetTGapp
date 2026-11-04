@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildCatalog, formatAmount, SHEETS, stableId } from '../recipe-sheet'
+import { buildCatalog, formatAmount, planMerge, SHEETS, stableId } from '../recipe-sheet'
 
 const sheets = {
   [SHEETS.dishes]: [
@@ -57,5 +57,43 @@ describe('імпорт рецептів', () => {
   it('падає на битому посиланні', () => {
     const broken = { ...sheets, [SHEETS.lines]: [sheets[SHEETS.lines][0]!, [1, '', 99, '', 1, null, 'г', null, 1]] }
     expect(() => buildCatalog(broken)).toThrow(/невідомий інгредієнт id=99/)
+  })
+
+  it('зливає з базою за назвою, а не за id файла', () => {
+    const c = buildCatalog(sheets)
+    const plan = planMerge(c, {
+      ingredients: [
+        { id: 'db-grechka', name: 'гречка', aliases: [] },
+        { id: 'db-tomato', name: 'Томати', aliases: ['Томат'] },
+      ],
+      // той самий id, що дав би файл, але інша страва — не чіпаємо
+      recipes: [{ id: stableId('recipe:1'), title: 'Омлет', aliases: [] }],
+    })
+    expect(plan.recipes).toHaveLength(1)
+    expect(plan.recipes[0]!.status).toBe('new')
+    expect(plan.recipes[0]!.row.id).not.toBe(stableId('recipe:1'))
+    expect(plan.newIngredients.map((i) => i.name)).toEqual(['Сіль'])
+    expect(plan.ingredientAliases).toEqual([{ id: 'db-tomato', name: 'Томати', aliases: ['Томат', 'Помідор', 'Черрі'] }])
+    expect(plan.lines.map((l) => [l.ingredient_id, l.name])).toEqual([
+      ['db-grechka', 'гречка'],
+      ['db-tomato', 'Томати'],
+      [plan.newIngredients[0]!.id, 'Сіль'],
+    ])
+  })
+
+  it('впізнає рецепт, що вже є, і повтори у файлі', () => {
+    const doubled = {
+      ...sheets,
+      [SHEETS.recipes]: [...sheets[SHEETS.recipes], [2, null, 'гречка з КУРКОЮ', null, null, null, null, null]],
+    }
+    const plan = planMerge(buildCatalog(doubled), {
+      ingredients: [],
+      recipes: [{ id: 'db-1', title: 'Гречка зі шматочками', aliases: ['Гречка з куркою'] }],
+    })
+    expect(plan.recipes.map((r) => [r.status, r.row.id, r.existingTitle])).toEqual([
+      ['existing', 'db-1', 'Гречка зі шматочками'],
+    ])
+    expect(plan.duplicatesInFile).toEqual(['гречка з КУРКОЮ'])
+    expect(plan.lines.every((l) => l.recipe_id === 'db-1')).toBe(true)
   })
 })

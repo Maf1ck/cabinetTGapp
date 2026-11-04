@@ -1,6 +1,6 @@
 // Дані робочого кабінету нутриціолога. RLS пускає is_nutri() до всіх клієнтів.
 import { supabase } from '@/lib/supabase'
-import { isoDate } from '@/lib/dates'
+import { isoDate, weekday, weekStart } from '@/lib/dates'
 import type { MealType } from '@/lib/meals'
 import { must, type Wellbeing } from './client'
 
@@ -39,7 +39,16 @@ export interface DiaryItem {
   taken_at: string
   photo_path: string | null
   photoUrl: string | null
+  hunger: number | null
+  fullness: number | null
+  mood: string | null
   client: { id: string; full_name: string } | null
+}
+
+export interface DiaryDetails {
+  comments: { id: string; body: string; created_at: string }[]
+  /** що стояло в меню на цей прийом — щоб порівняти з тим, що на фото */
+  planned: { title: string; recipe_id: string | null; eaten: boolean } | null
 }
 
 const CLIENT_FIELDS = 'id, full_name, goal, program_title, program_week, program_weeks, active, user_id, created_at'
@@ -111,7 +120,7 @@ export async function listUnseenDiary(limit = 6): Promise<DiaryItem[]> {
   const rows = must(
     await supabase()
       .from('diary_entries')
-      .select('id, meal, note, taken_at, photo_path, client:clients(id, full_name)')
+      .select('id, meal, note, taken_at, photo_path, hunger, fullness, mood, client:clients(id, full_name)')
       .eq('seen_by_nutri', false)
       .order('taken_at', { ascending: false })
       .limit(limit),
@@ -125,6 +134,35 @@ export async function listUnseenDiary(limit = 6): Promise<DiaryItem[]> {
     for (const s of data ?? []) if (s.path && s.signedUrl) urls.set(s.path, s.signedUrl)
   }
   return rows.map((r) => ({ ...r, photoUrl: r.photo_path ? (urls.get(r.photo_path) ?? null) : null }))
+}
+
+export async function getDiaryDetails(entry: DiaryItem): Promise<DiaryDetails> {
+  const taken = new Date(entry.taken_at)
+  const [comments, planned] = await Promise.all([
+    supabase().from('diary_comments').select('id, body, created_at').eq('entry_id', entry.id).order('created_at'),
+    entry.meal && entry.client
+      ? supabase()
+          .from('menu_meals')
+          .select('title, recipe_id, menus!inner(client_id, week_start), meal_checks(meal_id)')
+          .eq('menus.client_id', entry.client.id)
+          .eq('menus.week_start', isoDate(weekStart(taken)))
+          .eq('day', weekday(taken))
+          .eq('meal', entry.meal)
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ])
+  const row = must(planned) as { title: string; recipe_id: string | null; meal_checks: unknown[] | unknown | null } | null
+  return {
+    comments: must(comments) as DiaryDetails['comments'],
+    planned: row
+      ? {
+          title: row.title,
+          recipe_id: row.recipe_id,
+          eaten: Array.isArray(row.meal_checks) ? row.meal_checks.length > 0 : !!row.meal_checks,
+        }
+      : null,
+  }
 }
 
 export async function markDiarySeen(id: string): Promise<void> {
