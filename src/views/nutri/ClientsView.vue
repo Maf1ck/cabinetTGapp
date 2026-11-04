@@ -283,6 +283,7 @@ main.page.clients
       p.notice(v-if='inviteError' role='alert') {{ inviteError }}
 
       .clients__actions
+        RouterLink.btn.btn--primary(v-if='selected.active' :to='{ path: "/n/builder", query: { client: selected.id } }') Скласти меню
         button.btn.btn--ghost(type='button' @click='startEdit') Редагувати
         button.btn.btn--ghost(type='button' @click='toggleActive') {{ selected.active ? 'Призупинити доступ' : 'Відновити доступ' }}
 

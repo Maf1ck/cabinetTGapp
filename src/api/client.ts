@@ -202,3 +202,93 @@ export async function getDiaryDays(clientId: string, sinceIso: string): Promise<
   ) as { taken_at: string }[]
   return rows.map((r) => isoDate(new Date(r.taken_at)))
 }
+
+// ---------------------------------------------------------------- фото-щоденник
+
+export interface DiaryComment {
+  id: string
+  body: string
+  created_at: string
+}
+
+export interface DiaryEntry {
+  id: string
+  meal: MealType | null
+  note: string | null
+  taken_at: string
+  photo_path: string | null
+  hunger: number | null
+  fullness: number | null
+  mood: string | null
+  seen_by_nutri: boolean
+  comments: DiaryComment[]
+  photoUrl: string | null
+}
+
+export interface DiaryDraft {
+  meal: MealType
+  note: string | null
+  hunger: number | null
+  fullness: number | null
+  mood: string | null
+  taken_at: string
+}
+
+const DIARY_FIELDS =
+  'id, meal, note, taken_at, photo_path, hunger, fullness, mood, seen_by_nutri, comments:diary_comments(id, body, created_at)'
+
+/** Підписані посилання на фото з приватного бакета (живуть годину). */
+async function withPhotos(rows: Omit<DiaryEntry, 'photoUrl'>[]): Promise<DiaryEntry[]> {
+  const paths = rows.map((r) => r.photo_path).filter((p): p is string => !!p)
+  const urls = new Map<string, string>()
+  if (paths.length) {
+    const { data } = await supabase().storage.from('diary').createSignedUrls(paths, 3600)
+    for (const s of data ?? []) if (s.path && s.signedUrl) urls.set(s.path, s.signedUrl)
+  }
+  return rows.map((r) => ({
+    ...r,
+    comments: [...(r.comments ?? [])].sort((a, b) => a.created_at.localeCompare(b.created_at)),
+    photoUrl: r.photo_path ? (urls.get(r.photo_path) ?? null) : null,
+  }))
+}
+
+export async function getDiary(clientId: string, from: Date, to: Date): Promise<DiaryEntry[]> {
+  const rows = must(
+    await supabase()
+      .from('diary_entries')
+      .select(DIARY_FIELDS)
+      .eq('client_id', clientId)
+      .gte('taken_at', from.toISOString())
+      .lt('taken_at', to.toISOString())
+      .order('taken_at'),
+  ) as Omit<DiaryEntry, 'photoUrl'>[]
+  return withPhotos(rows)
+}
+
+export async function addDiaryEntry(clientId: string, draft: DiaryDraft, photo: Blob | null): Promise<DiaryEntry> {
+  let photo_path: string | null = null
+  if (photo) {
+    // перша папка = client_id: саме за нею Storage-політика пускає клієнта
+    photo_path = `${clientId}/${crypto.randomUUID()}.jpg`
+    const { error } = await supabase()
+      .storage.from('diary')
+      .upload(photo_path, photo, { contentType: photo.type || 'image/jpeg' })
+    if (error) throw error
+  }
+  const { data, error } = await supabase()
+    .from('diary_entries')
+    .insert({ client_id: clientId, ...draft, photo_path })
+    .select(DIARY_FIELDS)
+    .single()
+  if (error) {
+    if (photo_path) await supabase().storage.from('diary').remove([photo_path])
+    throw error
+  }
+  const [entry] = await withPhotos([data as Omit<DiaryEntry, 'photoUrl'>])
+  return entry!
+}
+
+export async function deleteDiaryEntry(entry: Pick<DiaryEntry, 'id' | 'photo_path'>): Promise<void> {
+  must(await supabase().from('diary_entries').delete().eq('id', entry.id))
+  if (entry.photo_path) await supabase().storage.from('diary').remove([entry.photo_path])
+}

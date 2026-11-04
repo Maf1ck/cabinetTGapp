@@ -174,3 +174,137 @@ export async function getWellbeingSince(clientId: string, since: string): Promis
       .order('day'),
   )
 }
+
+// ---------------------------------------------------------------- конструктор меню
+
+export interface EditableMeal {
+  id: string
+  day: number
+  meal: MealType
+  at_time: string | null
+  title: string
+}
+
+export interface EditableMenu {
+  id: string
+  published: boolean
+  meals: EditableMeal[]
+}
+
+const MEAL_FIELDS = 'id, day, meal, at_time, title'
+
+/** Меню клієнта на тиждень разом із чернеткою (нутриціолог бачить і неопубліковані). */
+export async function getMenuForEdit(clientId: string, weekStart: string): Promise<EditableMenu | null> {
+  const menu = must(
+    await supabase()
+      .from('menus')
+      .select('id, published')
+      .eq('client_id', clientId)
+      .eq('week_start', weekStart)
+      .maybeSingle(),
+  ) as { id: string; published: boolean } | null
+  if (!menu) return null
+  const meals = must(
+    await supabase().from('menu_meals').select(MEAL_FIELDS).eq('menu_id', menu.id).order('day').order('meal'),
+  ) as EditableMeal[]
+  return { ...menu, meals }
+}
+
+/** Меню створюється при першій страві; нове — завжди чернетка. */
+export async function ensureMenu(clientId: string, weekStart: string): Promise<EditableMenu> {
+  const existing = await getMenuForEdit(clientId, weekStart)
+  if (existing) return existing
+  const row = must(
+    await supabase()
+      .from('menus')
+      .upsert({ client_id: clientId, week_start: weekStart }, { onConflict: 'client_id,week_start' })
+      .select('id, published')
+      .single(),
+  ) as { id: string; published: boolean }
+  return { ...row, meals: [] }
+}
+
+export async function saveMeal(
+  menuId: string,
+  meal: Omit<EditableMeal, 'id'> & { id?: string },
+): Promise<EditableMeal> {
+  const row = { menu_id: menuId, day: meal.day, meal: meal.meal, at_time: meal.at_time, title: meal.title }
+  const table = supabase().from('menu_meals')
+  return must(
+    meal.id
+      ? await table.update(row).eq('id', meal.id).select(MEAL_FIELDS).single()
+      : await table.insert(row).select(MEAL_FIELDS).single(),
+  )
+}
+
+export async function deleteMeal(id: string): Promise<void> {
+  must(await supabase().from('menu_meals').delete().eq('id', id))
+}
+
+export async function setMenuPublished(menuId: string, published: boolean): Promise<void> {
+  must(await supabase().from('menus').update({ published }).eq('id', menuId))
+}
+
+/** Копіює страви з іншого тижня (наприклад, минулого), замінюючи наявні. */
+export async function copyMenu(clientId: string, fromWeek: string, toWeek: string): Promise<EditableMenu | null> {
+  const source = await getMenuForEdit(clientId, fromWeek)
+  if (!source?.meals.length) return null
+  const target = await ensureMenu(clientId, toWeek)
+  must(await supabase().from('menu_meals').delete().eq('menu_id', target.id))
+  const meals = must(
+    await supabase()
+      .from('menu_meals')
+      .insert(source.meals.map(({ day, meal, at_time, title }) => ({ menu_id: target.id, day, meal, at_time, title })))
+      .select(MEAL_FIELDS),
+  ) as EditableMeal[]
+  return { ...target, meals }
+}
+
+// ---------------------------------------------------------------- календар
+
+export interface CalendarItem {
+  id: string
+  starts_at: string
+  duration_min: number
+  kind: string
+  status: 'planned' | 'done' | 'cancelled'
+  zoom_url: string | null
+  note: string | null
+  client: { id: string; full_name: string } | null
+}
+
+export interface AppointmentDraft {
+  client_id: string
+  starts_at: string
+  duration_min: number
+  kind: string
+  zoom_url: string | null
+  note: string | null
+}
+
+const APPT_FIELDS = 'id, starts_at, duration_min, kind, status, zoom_url, note, client:clients(id, full_name)'
+
+export async function getCalendar(from: Date, to: Date): Promise<CalendarItem[]> {
+  return must(
+    await supabase()
+      .from('appointments')
+      .select(APPT_FIELDS)
+      .neq('status', 'cancelled')
+      .gte('starts_at', from.toISOString())
+      .lt('starts_at', to.toISOString())
+      .order('starts_at'),
+  ) as unknown as CalendarItem[]
+}
+
+export async function saveAppointment(draft: AppointmentDraft, id?: string): Promise<CalendarItem> {
+  const table = supabase().from('appointments')
+  return must(
+    id
+      ? await table.update(draft).eq('id', id).select(APPT_FIELDS).single()
+      : await table.insert(draft).select(APPT_FIELDS).single(),
+  ) as unknown as CalendarItem
+}
+
+export async function setAppointmentStatus(id: string, status: CalendarItem['status']): Promise<void> {
+  must(await supabase().from('appointments').update({ status }).eq('id', id))
+}
