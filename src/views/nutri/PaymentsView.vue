@@ -84,7 +84,13 @@ function openForm(p?: PaymentRow) {
       }
 }
 
-const formValid = computed(() => !!form.value?.client_id && !!form.value.title.trim() && (form.value.amount ?? 0) > 0)
+const formValid = computed(
+  () =>
+    !!form.value?.client_id &&
+    !!form.value.title.trim() &&
+    (form.value.amount ?? 0) > 0 &&
+    (!form.value.pay_url.trim() || form.value.pay_url.trim().startsWith('https://')),
+)
 
 async function submit() {
   const f = form.value
@@ -216,7 +222,7 @@ main.page.payments
           input(v-model='form.paid_on' type='date' :max='isoDate(now)')
         label.field(v-if='form.status === "pending"')
           | Посилання на оплату (необовʼязково)
-          input(v-model='form.pay_url' type='url' placeholder='https://…')
+          input(v-model='form.pay_url' type='url' placeholder='https://…' pattern='https://.*' title='Посилання має починатися з https://')
       .payments__actions
         button.btn.btn--primary(type='submit' :disabled='busy || !formValid') Зберегти
         button.btn.btn--ghost(type='button' @click='form = null') Скасувати

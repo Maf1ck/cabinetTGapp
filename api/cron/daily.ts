@@ -1,11 +1,16 @@
 // Щоранку (vercel.json → crons, 06:00 UTC ≈ 8:00 за Києвом взимку):
 // нагадування клієнтам про сьогоднішні консультації і ранковий підсумок для Анастасії.
 // Vercel сам додає заголовок Authorization: Bearer $CRON_SECRET.
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { db } from '../../server/accounts.js'
 import { env, ownerTgId } from '../../server/env.js'
 import { clientChat, firstName, kyivDate, sendOnce, texts } from '../../server/notify.js'
 
 const SILENT_DAYS = 3
+
+// хеші однакової довжини: timingSafeEqual не видає ні довжину, ні збіг префікса
+const sha = (s: string) => createHash('sha256').update(s).digest()
+const sameSecret = (a: string, b: string) => timingSafeEqual(sha(a), sha(b))
 
 interface ApptRow {
   id: string
@@ -17,7 +22,7 @@ interface ApptRow {
 }
 
 export async function GET(req: Request): Promise<Response> {
-  if (req.headers.get('authorization') !== `Bearer ${env('CRON_SECRET')}`)
+  if (!sameSecret(req.headers.get('authorization') ?? '', `Bearer ${env('CRON_SECRET')}`))
     return Response.json({ error: 'unauthorized' }, { status: 401 })
 
   const sb = db()

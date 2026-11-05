@@ -26,6 +26,12 @@ describe('сповіщення', () => {
     ).toBe('📸 <b>Олена Коваль</b> · вечеря\n«Риба з овочами»\nголод 4/5 · спокійно')
   })
 
+  it('не пропускає HTML з настрою клієнта', () => {
+    const t = texts.diaryEntry('Олена', { meal: null, note: null, hunger: null, fullness: null, mood: '<a href="https://x">тиць</a>' })
+    expect(t).not.toContain('<a')
+    expect(t).toContain('&lt;a href="https://x"&gt;тиць&lt;/a&gt;')
+  })
+
   it('ранковий підсумок', () => {
     const t = texts.digest({
       appointments: [{ starts_at: '2026-11-05T08:30:00Z', client: 'Олена', kind: 'Перша консультація' }],

@@ -3,7 +3,7 @@
 // на сторінці «Мої аналізи» і в картці клієнта в нутриціолога.
 import { onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
-import { deleteLab, LAB_ACCEPT, LAB_MAX_MB, listLabs, uploadLab, type LabFile } from '@/api/labs'
+import { deleteLab, LAB_ACCEPT, LAB_MAX_MB, LAB_TYPES, listLabs, uploadLab, type LabFile } from '@/api/labs'
 import { shortDate } from '@/lib/dates'
 
 const props = defineProps<{ clientId: string; canUpload?: boolean }>()
@@ -36,6 +36,11 @@ function pick(e: Event) {
   error.value = ''
   if (f && f.size > LAB_MAX_MB * 1024 * 1024) {
     error.value = `Файл більший за ${LAB_MAX_MB} МБ. Стисніть фото або розбийте PDF.`
+    picked.value = null
+    return
+  }
+  if (f && !LAB_TYPES.includes(f.type) && !/\.heic$/i.test(f.name)) {
+    error.value = 'Підходять лише PDF і фото (JPG, PNG, HEIC).'
     picked.value = null
     return
   }

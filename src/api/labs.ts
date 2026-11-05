@@ -13,7 +13,9 @@ export interface LabFile {
 }
 
 export const LAB_MAX_MB = 15
-export const LAB_ACCEPT = '.pdf,image/*'
+// те саме, що дозволяє бакет labs (міграція 0006)
+export const LAB_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']
+export const LAB_ACCEPT = `.pdf,.heic,${LAB_TYPES.join(',')}`
 
 export async function listLabs(clientId: string): Promise<LabFile[]> {
   const rows = must(
@@ -40,10 +42,11 @@ const extOf = (name: string) => name.match(/\.([a-z0-9]{1,5})$/i)?.[1]?.toLowerC
 
 export async function uploadLab(clientId: string, file: File, title: string): Promise<LabFile> {
   if (file.size > LAB_MAX_MB * 1024 * 1024) throw new Error('too_big')
+  if (!LAB_TYPES.includes(file.type) && !/\.heic$/i.test(file.name)) throw new Error('bad_type')
   const file_path = `${clientId}/${crypto.randomUUID()}.${extOf(file.name)}`
   const { error } = await supabase()
     .storage.from('labs')
-    .upload(file_path, file, { contentType: file.type || 'application/octet-stream' })
+    .upload(file_path, file, { contentType: file.type || 'image/heic' })
   if (error) throw error
   const { data, error: insertError } = await supabase()
     .from('lab_files')

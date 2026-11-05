@@ -80,7 +80,7 @@ export const texts = {
     const feel = [
       e.hunger ? `голод ${e.hunger}/5` : null,
       e.fullness ? `ситість ${e.fullness}/5` : null,
-      e.mood ? e.mood.toLowerCase() : null,
+      e.mood ? escapeHtml(e.mood.toLowerCase()) : null,
     ].filter(Boolean)
     return [
       `📸 <b>${escapeHtml(client)}</b> · ${meal}`,

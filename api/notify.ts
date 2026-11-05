@@ -8,6 +8,8 @@ import { clientChat, sendOnce, texts, type SendResult } from '../server/notify.j
 const EVENTS = ['menu_published', 'diary_comment', 'diary_entry', 'appointment', 'lab_file'] as const
 type Event = (typeof EVENTS)[number]
 
+const ENTRY_BURST = 10
+
 const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i
 
 interface CommentRow {
@@ -106,11 +108,19 @@ export async function POST(req: Request): Promise<Response> {
       .eq('id', id)
       .maybeSingle()
     const entry = data as EntryRow | null
-    if (entry && entry.client_id === me.clientId) {
+    // не більше ENTRY_BURST сповіщень на годину від одного клієнта — решту видно в кабінеті
+    const { count: recent } = entry
+      ? await sb
+          .from('notification_log')
+          .select('key', { count: 'exact', head: true })
+          .like('key', `entry:${entry.client_id}:%`)
+          .gte('sent_at', new Date(Date.now() - 3600e3).toISOString())
+      : { count: 0 }
+    if (entry && entry.client_id === me.clientId && (recent ?? 0) < ENTRY_BURST) {
       const photo = entry.photo_path
         ? (await sb.storage.from('diary').createSignedUrl(entry.photo_path, 600)).data?.signedUrl
         : null
-      result = await sendOnce(sb, `entry:${entry.id}`, owner, {
+      result = await sendOnce(sb, `entry:${entry.client_id}:${entry.id}`, owner, {
         text: texts.diaryEntry(entry.client?.full_name ?? 'Клієнт', entry),
         photoUrl: photo,
         path: '/n',
