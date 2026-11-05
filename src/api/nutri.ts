@@ -248,6 +248,8 @@ export interface EditableMeal {
   at_time: string | null
   title: string
   recipe_id: string | null
+  /** клієнт відмітив страву з'їденою */
+  eaten: boolean
 }
 
 export interface EditableMenu {
@@ -269,9 +271,19 @@ export async function getMenuForEdit(clientId: string, weekStart: string): Promi
       .maybeSingle(),
   ) as { id: string; published: boolean } | null
   if (!menu) return null
-  const meals = must(
-    await supabase().from('menu_meals').select(MEAL_FIELDS).eq('menu_id', menu.id).order('day').order('meal'),
-  ) as EditableMeal[]
+  const rows = must(
+    await supabase()
+      .from('menu_meals')
+      .select(`${MEAL_FIELDS}, meal_checks(meal_id)`)
+      .eq('menu_id', menu.id)
+      .order('day')
+      .order('meal'),
+  ) as (Omit<EditableMeal, 'eaten'> & { meal_checks: unknown[] | unknown | null })[]
+  // meal_checks — один-до-одного, тож PostgREST віддає обʼєкт або null (а інколи масив)
+  const meals = rows.map(({ meal_checks, ...m }) => ({
+    ...m,
+    eaten: Array.isArray(meal_checks) ? meal_checks.length > 0 : !!meal_checks,
+  }))
   return { ...menu, meals }
 }
 
@@ -291,8 +303,8 @@ export async function ensureMenu(clientId: string, weekStart: string): Promise<E
 
 export async function saveMeal(
   menuId: string,
-  meal: Omit<EditableMeal, 'id'> & { id?: string },
-): Promise<EditableMeal> {
+  meal: Omit<EditableMeal, 'id' | 'eaten'> & { id?: string },
+): Promise<Omit<EditableMeal, 'eaten'>> {
   const row = {
     menu_id: menuId,
     day: meal.day,
@@ -338,8 +350,8 @@ export async function copyMenu(clientId: string, fromWeek: string, toWeek: strin
         })),
       )
       .select(MEAL_FIELDS),
-  ) as EditableMeal[]
-  return { ...target, meals }
+  ) as Omit<EditableMeal, 'eaten'>[]
+  return { ...target, meals: meals.map((m) => ({ ...m, eaten: false })) }
 }
 
 // ---------------------------------------------------------------- календар

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useAuth } from '@/stores/auth'
 import AppIcon from '@/components/AppIcon.vue'
+import HintCard from '@/components/HintCard.vue'
 import {
   getClientCard,
   getDiaryDays,
@@ -36,6 +37,7 @@ import {
   weekStart,
 } from '@/lib/dates'
 import { hhmm, MEAL_LABEL } from '@/lib/meals'
+import { useSettle } from '@/lib/settle'
 
 const GLASS_ML = 250
 const WATER_GOAL = 8 // склянок = 2 л
@@ -74,8 +76,11 @@ const water = ref(0)
 const wellbeing = ref<Wellbeing>({ energy: null, sleep: null, digestion: null, mood: null })
 const meals = ref<Meal[] | null>(null)
 const shopping = ref<ShoppingItem[]>([])
-// на головній — лише перші некуплені, решта на сторінці «Список покупок»
-const shoppingShown = computed(() => shopping.value.filter((i) => !i.checked).slice(0, 6))
+// на головній — лише перші некуплені, решта на сторінці «Список покупок».
+// Відмічене спершу закреслюється, а за мить плавно зникає — і на його місце виїжджає наступне.
+const { parked, fresh, reset: resetShop, update: settleShop } = useSettle()
+const shoppingShown = computed(() => shopping.value.filter((i) => !parked.value.has(i.id)).slice(0, 6))
+const shoppingLeft = computed(() => shopping.value.filter((i) => !i.checked).length)
 const habits = ref<Habit[]>([])
 const diaryStreak = ref(0)
 const selectedDay = ref(todayWd)
@@ -117,6 +122,7 @@ async function load() {
     wellbeing.value = wb
     meals.value = m
     shopping.value = s
+    resetShop(s.filter((i) => i.checked).map((i) => i.id))
     habits.value = h
     diaryStreak.value = streak(d, now)
   } catch {
@@ -171,8 +177,14 @@ function toggleMeal(meal: Meal) {
 function toggleItem(item: ShoppingItem) {
   const after = !item.checked
   save(
-    () => (item.checked = after),
-    () => (item.checked = !after),
+    () => {
+      item.checked = after
+      settleShop(item.id, after)
+    },
+    () => {
+      item.checked = !after
+      settleShop(item.id, !after)
+    },
     () => setShoppingChecked(item.id, after),
   )
 }
@@ -214,6 +226,11 @@ main.page.today
       button.btn.btn--soft.btn--sm(type='button' @click='load') Спробувати ще раз
 
   template(v-else)
+    HintCard(id='today' title='Як користуватися кабінетом')
+      ul
+        li Зʼїли страву з меню — натисніть «Відмітити зʼїденим». Анастасія бачить ці відмітки.
+        li Сфотографуйте тарілку в #[RouterLink(to='/c/diary') Щоденнику] — там можна просто обрати страву з меню.
+        li Додавайте склянки води й відмічайте самопочуття — це займає кілька секунд.
     .today__cards
       .card.card--dark.today__appt
         .eyebrow Наступна зустріч
@@ -267,7 +284,9 @@ main.page.today
       p.empty(v-else-if='!dayMeals.length') На цей день страв немає.
       .today__meals(v-else)
         article.today__meal(v-for='m in dayMeals' :key='m.id' :class='{ "today__meal--now": m.id === currentMealId }')
-          .photo-ph.today__meal-photo Фото страви
+          img.today__meal-photo(v-if='m.photoUrl' :src='m.photoUrl' :alt='m.title' loading='lazy')
+          .photo-ph.today__meal-photo(v-else aria-hidden='true')
+            AppIcon(name='leaf' :size='26')
           .today__meal-body
             .today__meal-type {{ MEAL_LABEL[m.meal] }}{{ m.at_time ? ` · ${hhmm(m.at_time)}` : '' }}{{ m.id === currentMealId ? ' · зараз' : '' }}
             b {{ m.title }}
@@ -285,11 +304,13 @@ main.page.today
           h2.card__title Список покупок
           span.today__hint з меню на тиждень
         p.empty(v-if='!shopping.length') Список зʼявиться разом із меню.
-        label.today__check(v-for='item in shoppingShown' :key='item.id' :class='{ "is-on": item.checked }')
-          input(type='checkbox' :checked='item.checked' @change='toggleItem(item)')
-          span {{ item.name }}{{ item.amount ? `, ${item.amount}` : '' }}
+        TransitionGroup.today__checks(tag='div' name='today-check')
+          label.today__check(v-for='item in shoppingShown' :key='item.id' :class='{ "is-on": item.checked, "is-fresh": fresh.has(item.id) }')
+            input(type='checkbox' :checked='item.checked' @change='toggleItem(item)')
+            span: span {{ item.name }}{{ item.amount ? `, ${item.amount}` : '' }}
+        p.today__all-done(v-if='shopping.length && !shoppingShown.length') Усе куплено 🎉
         RouterLink.today__more(v-if='shopping.length' to='/c/shop')
-          | {{ shopping.length > shoppingShown.length ? `Увесь список (ще ${shopping.length - shoppingShown.length}) →` : 'Увесь список →' }}
+          | {{ shoppingLeft > shoppingShown.length ? `Увесь список (ще ${shoppingLeft - shoppingShown.length}) →` : 'Увесь список →' }}
 
       section.card.today__habits
         h2.card__title Звички тижня
@@ -473,7 +494,10 @@ main.page.today
   }
 
   &__meal-photo {
+    width: 100%;
+    vertical-align: top;
     height: 110px;
+    object-fit: cover;
   }
 
   &__meal-body {
@@ -569,10 +593,39 @@ main.page.today
       accent-color: $accent;
     }
 
-    &.is-on span {
-      color: $text-faint;
-      text-decoration: line-through;
+    > span {
+      transition: color 0.3s ease;
+
+      > span {
+        background: linear-gradient(currentColor, currentColor) no-repeat 0 55% / 0 2px;
+        box-decoration-break: clone;
+        transition: background-size 0.35s ease;
+      }
     }
+
+    &.is-on > span {
+      color: $text-faint;
+
+      > span {
+        background-size: 100% 2px;
+      }
+    }
+
+    &.is-fresh input {
+      animation: today-pop 0.35s ease-out;
+    }
+  }
+
+  &__checks {
+    display: flex;
+    flex-direction: column;
+  }
+
+  &__all-done {
+    margin: 4px 0;
+    color: $text-active;
+    font-weight: 700;
+    animation: today-pop 0.5s ease-out;
   }
 
   &__habits {
@@ -601,6 +654,46 @@ main.page.today
       background: $accent;
       transition: width 0.3s ease;
     }
+  }
+}
+
+// пункт списку: зникає вбік і згортається, наступний підʼїжджає знизу
+.today-check-move {
+  transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.today-check-enter-active,
+.today-check-leave-active {
+  overflow: hidden;
+  transition:
+    opacity 0.35s ease,
+    transform 0.35s ease,
+    max-height 0.35s ease,
+    min-height 0.35s ease;
+}
+
+.today-check-enter-from,
+.today-check-leave-to {
+  max-height: 0;
+  min-height: 0 !important;
+  opacity: 0;
+  transform: translateX(24px);
+}
+
+.today-check-enter-to,
+.today-check-leave-from {
+  max-height: 80px;
+}
+
+@keyframes today-pop {
+  0% {
+    transform: scale(0.6);
+  }
+  60% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
   }
 }
 

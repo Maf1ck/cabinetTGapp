@@ -5,6 +5,7 @@ import type { MealType } from '@/lib/meals'
 import { notify } from './notify'
 import { normalize } from '@/lib/recipes'
 import { buildShoppingList, type ShopLine, type ShopRecipe } from '@/lib/shopping'
+import { recipePhotoUrls } from './recipes'
 
 type Result<T> = { data: T | null; error: unknown }
 
@@ -37,6 +38,8 @@ export interface Meal {
   title: string
   recipe_id: string | null
   eaten: boolean
+  /** фото страви з рецепта (якщо нутриціолог його додала) */
+  photoUrl: string | null
 }
 
 export interface ShoppingItem {
@@ -128,15 +131,21 @@ export async function getWeekMenu(clientId: string, weekStart: string): Promise<
   ) as { id: string } | null
   if (!menu) return null
 
-  const meals = must(
+  const rows = must(
     await supabase()
       .from('menu_meals')
-      .select('id, day, meal, at_time, title, recipe_id')
+      .select('id, day, meal, at_time, title, recipe_id, recipe:recipes(photo_path)')
       .eq('menu_id', menu.id)
       .order('day')
       .order('meal'),
-  ) as Omit<Meal, 'eaten'>[]
-  if (!meals.length) return []
+  ) as unknown as (Omit<Meal, 'eaten' | 'photoUrl'> & { recipe: { photo_path: string | null } | null })[]
+  if (!rows.length) return []
+
+  const photos = await recipePhotoUrls(rows.map((m) => m.recipe?.photo_path))
+  const meals = rows.map(({ recipe, ...m }) => ({
+    ...m,
+    photoUrl: recipe?.photo_path ? (photos.get(recipe.photo_path) ?? null) : null,
+  }))
 
   const checks = must(
     await supabase()

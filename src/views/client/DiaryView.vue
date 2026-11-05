@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAuth } from '@/stores/auth'
 import AppIcon from '@/components/AppIcon.vue'
-import { addDiaryEntry, deleteDiaryEntry, getDiary, type DiaryEntry } from '@/api/client'
-import { addDays, DAY_SHORT, days, fromIso, isoDate, streak, timeOf, weekday } from '@/lib/dates'
-import { MEAL_LABEL, MEAL_TIME, MEALS, mealByTime, type MealType } from '@/lib/meals'
+import HintCard from '@/components/HintCard.vue'
+import { addDiaryEntry, deleteDiaryEntry, getDiary, getWeekMenu, setMealEaten, type DiaryEntry, type Meal } from '@/api/client'
+import { addDays, DAY_SHORT, days, fromIso, isoDate, streak, timeOf, weekday, weekStart } from '@/lib/dates'
+import { dueMeals, hhmm, MEAL_LABEL, MEAL_TIME, MEALS, mealByTime, type MealType } from '@/lib/meals'
 import { compressImage, MAX_UPLOAD_BYTES } from '@/lib/image'
 
 const RANGE_DAYS = 14
@@ -38,6 +39,48 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const saving = ref(false)
 const formError = ref('')
 
+// ---- меню: що Анастасія запланувала на обраний день
+/** week_start → страви опублікованого меню (null — меню на тиждень немає) */
+const menus = ref(new Map<string, Meal[] | null>())
+/** страва з меню, яку обрали для запису */
+const fromMenu = ref<Meal | null>(null)
+
+const plannedForDay = computed(() => {
+  const date = fromIso(selected.value)
+  const week = menus.value.get(isoDate(weekStart(date)))
+  return (week ?? []).filter((m) => m.day === weekday(date))
+})
+/** на сьогодні — лише страви, чий час уже настав; за минулі дні — усі */
+const menuChoices = computed(() => dueMeals(plannedForDay.value, fromIso(selected.value), new Date()))
+const laterToday = computed(() => plannedForDay.value.length - menuChoices.value.length)
+const loggedMeals = computed(() => new Set(dayEntries.value.map((e) => e.meal)))
+
+function chooseFromMenu(m: Meal) {
+  if (fromMenu.value?.id === m.id) return clearMenuChoice()
+  fromMenu.value = m
+  meal.value = m.meal
+  note.value = m.title
+}
+
+function clearMenuChoice() {
+  if (fromMenu.value && note.value === fromMenu.value.title) note.value = ''
+  fromMenu.value = null
+}
+
+// змінили прийом їжі вручну — зв'язок зі стравою меню вже не той
+function onMealChange() {
+  if (fromMenu.value && fromMenu.value.meal !== meal.value) fromMenu.value = null
+}
+
+// інший день — інше меню
+watch(selected, clearMenuChoice)
+
+async function loadMenus() {
+  const weeks = [...new Set(strip.map((d) => isoDate(weekStart(d.date))))]
+  const loaded = await Promise.all(weeks.map((w) => getWeekMenu(clientId, w).catch(() => null)))
+  menus.value = new Map(weeks.map((w, i) => [w, loaded[i] ?? null]))
+}
+
 const byDay = computed(() => {
   const map = new Map<string, DiaryEntry[]>()
   for (const e of entries.value) {
@@ -57,7 +100,8 @@ async function load() {
   loading.value = true
   loadError.value = false
   try {
-    entries.value = await getDiary(clientId, from, addDays(now, 1))
+    const [diary] = await Promise.all([getDiary(clientId, from, addDays(now, 1)), loadMenus()])
+    entries.value = diary
   } catch {
     loadError.value = true
   } finally {
@@ -95,6 +139,7 @@ function resetForm() {
   hunger.value = null
   fullness.value = null
   mood.value = null
+  fromMenu.value = null
   meal.value = mealByTime(new Date())
 }
 
@@ -127,6 +172,12 @@ async function save() {
       blob,
     )
     entries.value = [...entries.value, entry].sort((a, b) => a.taken_at.localeCompare(b.taken_at))
+    // з'їли страву з меню — одразу відмічаємо її, Анастасія побачить це в меню
+    const planned = fromMenu.value
+    if (planned && !planned.eaten)
+      setMealEaten(clientId, planned.id, true)
+        .then(() => (planned.eaten = true))
+        .catch(() => {})
     resetForm()
   } catch (e) {
     formError.value =
@@ -161,6 +212,13 @@ main.page.diary
       .page-head__sub Без підрахунку калорій — лише фото, відчуття і звички
       h1.page-head__title Щоденник їжі
     .diary__streak(v-if='series > 0') #[b {{ days(series) }}] поспіль
+
+  HintCard(id='diary' title='Як вести щоденник')
+    ul
+      li Оберіть страву з меню — вона сама відмітиться зʼїденою. Їли інше — просто опишіть.
+      li Фото необовʼязкове, але так Анастасії легше підказати.
+      li Голод, ситість і настрій важливіші за калорії: відмічайте, як почувались.
+      li Забули записати? Оберіть потрібний день угорі.
 
   .diary__strip(role='tablist' aria-label='День')
     button(
@@ -204,9 +262,32 @@ main.page.diary
     form.card.diary__form(@submit.prevent='save')
       h2.card__title Новий запис
       p.diary__for(v-if='!isToday') За {{ fromIso(selected).getDate() }} число
+      .diary__menu(v-if='menuChoices.length')
+        span.diary__menu-title Що з меню ви їли?
+        .diary__menu-list
+          button.diary__menu-item(
+            v-for='m in menuChoices'
+            :key='m.id'
+            type='button'
+            :class='{ "is-on": fromMenu?.id === m.id }'
+            :aria-pressed='fromMenu?.id === m.id'
+            @click='chooseFromMenu(m)'
+          )
+            img(v-if='m.photoUrl' :src='m.photoUrl' alt='' loading='lazy')
+            span.diary__menu-ph(v-else aria-hidden='true'): AppIcon(name='leaf' :size='18')
+            span.diary__menu-text
+              small {{ MEAL_LABEL[m.meal] }}{{ m.at_time ? ` · ${hhmm(m.at_time)}` : '' }}
+              b {{ m.title }}
+            span.diary__menu-done(v-if='m.eaten || loggedMeals.has(m.meal)') {{ m.eaten ? 'зʼїдено' : 'є запис' }}
+        p.diary__hint.diary__hint--left
+          template(v-if='laterToday') Ще {{ laterToday }} {{ laterToday === 1 ? 'страва зʼявиться' : 'страви зʼявляться' }} тут ближче до свого часу.
+          |
+          | Їли щось інше — просто опишіть нижче.
+      p.diary__hint.diary__hint--left(v-else-if='plannedForDay.length && isToday') Страви з меню зʼявляться тут, щойно настане їхній час.
+
       label.field
         | Прийом їжі
-        select(v-model='meal')
+        select(v-model='meal' @change='onMealChange')
           option(v-for='o in mealOptions' :key='o.value' :value='o.value') {{ o.label }}
 
       input.sr-only(ref='fileInput' type='file' accept='image/*' capture='environment' @change='pickPhoto')
@@ -416,6 +497,94 @@ main.page.diary
     }
   }
 
+  &__menu {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  &__menu-title {
+    color: $text-nav;
+    font-size: 14px;
+  }
+
+  &__menu-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  &__menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px 8px 8px;
+    border: 1px solid $line-green;
+    border-radius: 14px;
+    background: $bg;
+    color: $text;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      border-color 0.15s ease,
+      background-color 0.15s ease,
+      transform 0.15s ease;
+
+    &:hover {
+      border-color: $accent;
+    }
+
+    &:active {
+      transform: scale(0.98);
+    }
+
+    &.is-on {
+      border-color: $accent;
+      background: $bg-active;
+      box-shadow: inset 0 0 0 1px $accent;
+    }
+
+    img,
+    .diary__menu-ph {
+      flex: none;
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      object-fit: cover;
+    }
+  }
+
+  &__menu-ph {
+    display: grid;
+    place-items: center;
+    background: $bg-tint;
+    color: $green-link;
+  }
+
+  &__menu-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+
+    small {
+      color: $green-link;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+  }
+
+  &__menu-done {
+    flex: none;
+    padding: 2px 8px;
+    border-radius: $pill;
+    background: $bg-soft;
+    color: $text-faint;
+    font-size: 12px;
+  }
+
   &__for {
     color: $text-warn;
     font-size: 14px;
@@ -515,9 +684,14 @@ main.page.diary
   }
 
   &__hint {
+    margin: 0;
     color: $text-faint;
     font-size: 13px;
     text-align: center;
+
+    &--left {
+      text-align: left;
+    }
   }
 }
 </style>

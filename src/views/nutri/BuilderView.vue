@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/AppIcon.vue'
+import HintCard from '@/components/HintCard.vue'
 import {
   copyMenu,
   deleteMeal,
@@ -59,6 +60,16 @@ const weekDays = computed(() =>
 const meals = computed(() => menu.value?.meals ?? [])
 const cell = (day: number, meal: MealType) => meals.value.find((m) => m.day === day && m.meal === meal)
 const perDay = (day: number) => meals.value.filter((m) => m.day === day).length
+const eatenPerDay = (day: number) => meals.value.filter((m) => m.day === day && m.eaten).length
+const eatenTotal = computed(() => meals.value.filter((m) => m.eaten).length)
+const dayIso = (day: number) => isoDate(addDays(monday.value, day - 1))
+/** день настав (сьогодні чи раніше) — показуємо, скільки відмічено */
+const isPast = (day: number) => dayIso(day) <= isoDate(now)
+/** день минув, а страву так і не відмітили */
+const missed = (day: number, meal: MealType) => {
+  const m = cell(day, meal)
+  return !!m && !!menu.value?.published && !m.eaten && dayIso(day) < isoDate(now)
+}
 // підказки для поля «страва»: усе, що вже є в цьому меню
 const suggestions = computed(() => [...new Set(meals.value.map((m) => m.title))].sort((a, b) => a.localeCompare(b, 'uk')))
 
@@ -200,8 +211,9 @@ function saveEditor() {
       title,
       recipe_id: e.recipeId,
     })
+    const before = target.meals.find((m) => m.id === saved.id)
     const rest = target.meals.filter((m) => m.id !== saved.id)
-    menu.value = { ...target, meals: [...rest, saved] }
+    menu.value = { ...target, meals: [...rest, { ...saved, eaten: before?.eaten ?? false }] }
     editor.value = null
   }, 'Не вдалося зберегти страву.')
 }
@@ -296,10 +308,20 @@ main.page.builder
 
     p.notice(v-if='error' role='alert') {{ error }}
 
+    HintCard(id='builder' title='Підказки до конструктора')
+      ul
+        li Обирайте страви з бази рецептів: клієнт побачить склад і приготування, а список покупок порахується сам.
+        li Додайте фото до рецепта в #[RouterLink(to='/n/recipes') Базі рецептів] — воно зʼявиться в меню клієнта.
+        li В опублікованому меню видно, що клієнт відмітив зʼїденим (зелена клітинка з ✓).
+
     section.card
       p.empty(v-if='menuLoading') Завантажуємо меню…
       template(v-else)
         p.builder__hint(v-if='!meals.length') Натисніть на клітинку, щоб додати страву. Меню побачить {{ client ? shortName(client.full_name) : 'клієнт' }} лише після «Надіслати клієнту».
+        .builder__legend(v-else-if='menu?.published')
+          span #[i.builder__dot.is-eaten] зʼїдено — клієнт відмітив
+          span #[i.builder__dot.is-missed] минулий день без відмітки
+          b Відмічено: {{ eatenTotal }} з {{ meals.length }}
         .builder__scroll
           .builder__grid
             div
@@ -312,7 +334,7 @@ main.page.builder
                 v-for='d in weekDays'
                 :key='`${t}-${d.day}`'
                 type='button'
-                :class='{ "is-empty": !cell(d.day, t), "is-editing": editor?.day === d.day && editor?.meal === t }'
+                :class='{ "is-empty": !cell(d.day, t), "is-editing": editor?.day === d.day && editor?.meal === t, "is-eaten": cell(d.day, t)?.eaten, "is-missed": missed(d.day, t) }'
                 :aria-label='cellLabel(cell(d.day, t), d.day, t)'
                 @click='openEditor(d.day, t)'
               )
@@ -322,10 +344,14 @@ main.page.builder
                   span.builder__linked(v-if='cell(d.day, t)?.recipe_id')
                     AppIcon(name='book' :size='12')
                     | рецепт
+                  span.builder__eaten(v-if='cell(d.day, t)?.eaten')
+                    AppIcon(name='check' :size='12')
+                    | зʼїдено
                 AppIcon(v-else name='plus' :size='18')
             .builder__type.builder__type--muted Разом
             .builder__total(v-for='d in weekDays' :key='`sum-${d.day}`' :class='{ "is-warn": perDay(d.day) === 0 }')
               | {{ perDay(d.day) ? `${perDay(d.day)} ${plural(perDay(d.day), 'прийом', 'прийоми', 'прийомів')}` : 'Порожньо' }}
+              small.builder__total-eaten(v-if='menu?.published && perDay(d.day) && isPast(d.day)') ✓ {{ eatenPerDay(d.day) }} з {{ perDay(d.day) }}
 
   //- редактор страви
   Transition(name='builder-dialog')
@@ -545,6 +571,15 @@ main.page.builder
       border-color: $accent;
     }
 
+    &.is-eaten {
+      border-color: $line-green;
+      background: $bg-active;
+    }
+
+    &.is-missed {
+      opacity: 0.6;
+    }
+
     &.is-empty {
       align-items: center;
       justify-content: center;
@@ -735,6 +770,58 @@ main.page.builder
   &__time {
     color: $text-faint;
     font-size: 12px;
+    font-weight: 700;
+  }
+
+  &__eaten {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: $text-active;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  &__legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 18px;
+    margin-bottom: 12px;
+    color: $text-muted;
+    font-size: 13px;
+
+    span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    b {
+      margin-left: auto;
+      color: $text;
+    }
+  }
+
+  &__dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+
+    &.is-eaten {
+      background: $bg-active;
+      box-shadow: inset 0 0 0 2px $line-green;
+    }
+
+    &.is-missed {
+      background: $bg-soft;
+      opacity: 0.6;
+      box-shadow: inset 0 0 0 1px $line;
+    }
+  }
+
+  &__total-eaten {
+    display: block;
     font-weight: 700;
   }
 

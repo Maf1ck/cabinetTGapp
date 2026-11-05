@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useAuth } from '@/stores/auth'
 import AppIcon from '@/components/AppIcon.vue'
+import HintCard from '@/components/HintCard.vue'
 import {
   addShoppingItem,
   deleteShoppingItem,
@@ -12,6 +13,7 @@ import {
 } from '@/api/client'
 import { addDays, isoDate, shortDate, weekStart } from '@/lib/dates'
 import { AISLES, OTHER_AISLE } from '@/lib/shopping'
+import { useSettle } from '@/lib/settle'
 
 const OWN = 'Додано вами'
 
@@ -34,18 +36,22 @@ const draft = ref('')
 const adding = ref(false)
 const shared = ref(false)
 
+// куплене спершу закреслюється, а за мить плавно їде вниз групи (або ховається)
+const { parked, fresh, reset, update } = useSettle()
+
 const done = computed(() => items.value.filter((i) => i.checked).length)
 const groups = computed(() => {
   const order = [...AISLES, OTHER_AISLE, OWN] as string[]
   const map = new Map<string, ShoppingItem[]>()
   for (const i of items.value) {
-    if (hideChecked.value && i.checked) continue
+    if (hideChecked.value && i.checked && parked.value.has(i.id)) continue
     const g = i.from_menu ? (i.category ?? OTHER_AISLE) : OWN
     map.set(g, [...(map.get(g) ?? []), i])
   }
+  const down = (i: ShoppingItem) => Number(parked.value.has(i.id))
   return [...map]
     .sort(([a], [b]) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99))
-    .map(([name, list]) => ({ name, list }))
+    .map(([name, list]) => ({ name, list: [...list].sort((a, b) => down(a) - down(b) || a.name.localeCompare(b.name, 'uk')) }))
 })
 
 async function load() {
@@ -54,6 +60,7 @@ async function load() {
   try {
     const r = await getShoppingList(clientId, isoDate(monday.value))
     items.value = r.items
+    reset(r.items.filter((i) => i.checked).map((i) => i.id))
     hasMenu.value = r.hasMenu
     withoutRecipe.value = r.withoutRecipe
   } catch {
@@ -65,11 +72,13 @@ async function load() {
 
 async function toggle(item: ShoppingItem) {
   item.checked = !item.checked
+  update(item.id, item.checked)
   saveError.value = false
   try {
     await setShoppingChecked(item.id, item.checked)
   } catch {
     item.checked = !item.checked
+    update(item.id, item.checked)
     saveError.value = true
   }
 }
@@ -80,6 +89,7 @@ async function uncheckAll() {
   try {
     await setShoppingAllChecked(ids, false)
     for (const i of items.value) i.checked = false
+    reset([])
   } catch {
     saveError.value = true
   }
@@ -154,6 +164,8 @@ main.page.shop
     button.btn.btn--soft.btn--sm(type='button' @click='load') Спробувати ще раз
 
   template(v-else)
+    HintCard(id='shop' title='Список збирається сам')
+      p Продукти й кількості рахуються з рецептів вашого меню на тиждень. Купили — натисніть на продукт, і він закреслиться та поїде вниз. «Поділитися» надішле, що лишилось купити, рідним у Telegram.
     section.card.shop__bar(v-if='items.length')
       .shop__progress
         b {{ done }} з {{ items.length }}
@@ -171,16 +183,18 @@ main.page.shop
     .shop__groups
       section.card.shop__group(v-for='g in groups' :key='g.name')
         h2.shop__aisle {{ g.name }} #[span {{ g.list.length }}]
-        .shop__item(v-for='i in g.list' :key='i.id' :class='{ "is-on": i.checked }')
-          label
-            input(type='checkbox' :checked='i.checked' @change='toggle(i)')
-            span.shop__name {{ i.name }}
-            span.shop__amount(v-if='i.amount') {{ i.amount }}
-            span.shop__amount.shop__amount--loose(v-else-if='i.from_menu') за смаком
-          button.shop__remove(v-if='!i.from_menu' type='button' :aria-label='`Видалити: ${i.name}`' @click='remove(i)')
-            AppIcon(name='close' :size='14')
+        TransitionGroup.shop__list(tag='div' name='shop-item')
+          .shop__item(v-for='i in g.list' :key='i.id' :class='{ "is-on": i.checked, "is-fresh": fresh.has(i.id) }')
+            label
+              input(type='checkbox' :checked='i.checked' @change='toggle(i)')
+              span.shop__name: span {{ i.name }}
+              span.shop__amount(v-if='i.amount') {{ i.amount }}
+              span.shop__amount.shop__amount--loose(v-else-if='i.from_menu') за смаком
+            button.shop__remove(v-if='!i.from_menu' type='button' :aria-label='`Видалити: ${i.name}`' @click='remove(i)')
+              AppIcon(name='close' :size='14')
 
-    p.empty(v-if='hideChecked && items.length && done === items.length') Усе куплено 🎉
+    Transition(name='shop-done')
+      p.empty.shop__all-done(v-if='items.length && done === items.length') Усе куплено 🎉
 
     form.card.shop__add(@submit.prevent='add')
       label.field
@@ -197,6 +211,58 @@ main.page.shop
 
 <style lang="scss">
 @use '@/scss/variables' as *;
+
+// ---- анімації списку: пункт їде вниз (move), ховається (leave), зʼявляється (enter)
+.shop-item-move {
+  transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.shop-item-enter-active,
+.shop-item-leave-active {
+  overflow: hidden;
+  transition:
+    opacity 0.35s ease,
+    transform 0.35s ease,
+    max-height 0.35s ease,
+    min-height 0.35s ease;
+}
+
+.shop-item-enter-from,
+.shop-item-leave-to {
+  max-height: 0;
+  min-height: 0;
+  opacity: 0;
+  transform: translateX(24px);
+}
+
+.shop-item-enter-to,
+.shop-item-leave-from {
+  max-height: 80px;
+}
+
+.shop-done-enter-active {
+  animation: shop-pop 0.5s ease-out;
+}
+
+@keyframes shop-pop {
+  0% {
+    transform: scale(0.6);
+  }
+  60% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shop-item-move,
+  .shop-item-enter-active,
+  .shop-item-leave-active {
+    transition: none;
+  }
+}
 
 .shop {
   &__week {
@@ -305,7 +371,12 @@ main.page.shop
     display: flex;
     align-items: center;
     gap: 6px;
+    margin: 0 -8px;
+    padding: 0 8px;
     border-bottom: 1px solid $line-soft;
+    border-radius: 10px;
+    background: transparent;
+    transition: background-color 0.4s ease;
 
     &:last-child {
       border-bottom: 0;
@@ -327,14 +398,38 @@ main.page.shop
       accent-color: $accent;
     }
 
+    // закреслення «пробігає» по назві, галочка підстрибує
     &.is-on .shop__name {
       color: $text-faint;
-      text-decoration: line-through;
+
+      > span {
+        background-size: 100% 2px;
+      }
     }
+
+    &.is-fresh {
+      background: $bg-active;
+
+      input {
+        animation: shop-pop 0.35s ease-out;
+      }
+    }
+  }
+
+  &__list {
+    display: flex;
+    flex-direction: column;
   }
 
   &__name {
     flex: 1;
+    transition: color 0.3s ease;
+
+    > span {
+      background: linear-gradient(currentColor, currentColor) no-repeat 0 55% / 0 2px;
+      box-decoration-break: clone;
+      transition: background-size 0.35s ease;
+    }
   }
 
   &__amount {

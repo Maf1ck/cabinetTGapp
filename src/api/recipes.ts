@@ -34,6 +34,9 @@ export interface Recipe {
   source: string | null
   aliases: string[]
   lines: RecipeLine[]
+  photo_path: string | null
+  /** підписане посилання на фото (живе годину) */
+  photoUrl: string | null
 }
 
 export interface Ingredient {
@@ -62,7 +65,7 @@ export interface RecipeDraft {
 }
 
 const LINE_FIELDS = 'id, ingredient_id, name, amount, qty_from, qty_to, unit, note, position'
-const RECIPE_FIELDS = `id, title, category, servings, instructions, notes, source, aliases, lines:recipe_ingredients(${LINE_FIELDS})`
+const RECIPE_FIELDS = `id, title, category, servings, instructions, notes, source, aliases, photo_path, lines:recipe_ingredients(${LINE_FIELDS})`
 
 type SummaryRow = Omit<RecipeSummary, 'ingredients'> & { recipe_ingredients: { name: string }[] }
 
@@ -75,9 +78,44 @@ export async function listRecipes(): Promise<RecipeSummary[]> {
 
 const sortLines = (r: Recipe): Recipe => ({ ...r, lines: [...r.lines].sort((a, b) => a.position - b.position) })
 
+/** Фото страв лежать у приватному бакеті `recipes`: віддаємо підписані посилання (на годину). */
+export async function recipePhotoUrls(paths: (string | null | undefined)[]): Promise<Map<string, string>> {
+  const unique = [...new Set(paths.filter((p): p is string => !!p))]
+  const urls = new Map<string, string>()
+  if (!unique.length) return urls
+  const { data } = await supabase().storage.from('recipes').createSignedUrls(unique, 3600)
+  for (const s of data ?? []) if (s.path && s.signedUrl) urls.set(s.path, s.signedUrl)
+  return urls
+}
+
 export async function getRecipe(id: string): Promise<Recipe | null> {
-  const row = must(await supabase().from('recipes').select(RECIPE_FIELDS).eq('id', id).maybeSingle()) as Recipe | null
-  return row ? sortLines(row) : null
+  const row = must(await supabase().from('recipes').select(RECIPE_FIELDS).eq('id', id).maybeSingle()) as Omit<
+    Recipe,
+    'photoUrl'
+  > | null
+  if (!row) return null
+  const urls = await recipePhotoUrls([row.photo_path])
+  return sortLines({ ...row, photoUrl: row.photo_path ? (urls.get(row.photo_path) ?? null) : null })
+}
+
+/** Ставить (або замінює) фото страви. Старий файл прибираємо лише після того, як новий записано. */
+export async function setRecipePhoto(recipe: Pick<Recipe, 'id' | 'photo_path'>, photo: Blob): Promise<Recipe> {
+  const ext = photo.type === 'image/png' ? 'png' : photo.type === 'image/webp' ? 'webp' : 'jpg'
+  const path = `${recipe.id}/${crypto.randomUUID()}.${ext}`
+  const { error } = await supabase().storage.from('recipes').upload(path, photo, { contentType: photo.type || 'image/jpeg' })
+  if (error) throw error
+  const { error: dbError } = await supabase().from('recipes').update({ photo_path: path }).eq('id', recipe.id)
+  if (dbError) {
+    await supabase().storage.from('recipes').remove([path])
+    throw dbError
+  }
+  if (recipe.photo_path) await supabase().storage.from('recipes').remove([recipe.photo_path])
+  return (await getRecipe(recipe.id))!
+}
+
+export async function removeRecipePhoto(recipe: Pick<Recipe, 'id' | 'photo_path'>): Promise<void> {
+  must(await supabase().from('recipes').update({ photo_path: null }).eq('id', recipe.id))
+  if (recipe.photo_path) await supabase().storage.from('recipes').remove([recipe.photo_path])
 }
 
 export async function listIngredients(): Promise<Ingredient[]> {
@@ -152,6 +190,7 @@ export async function saveRecipe(draft: RecipeDraft, catalog: Ingredient[], exis
 }
 
 /** Страви в меню, що посилались на рецепт, лишаються — лише без посилання (on delete set null). */
-export async function deleteRecipe(id: string): Promise<void> {
-  must(await supabase().from('recipes').delete().eq('id', id))
+export async function deleteRecipe(recipe: Pick<Recipe, 'id' | 'photo_path'>): Promise<void> {
+  must(await supabase().from('recipes').delete().eq('id', recipe.id))
+  if (recipe.photo_path) await supabase().storage.from('recipes').remove([recipe.photo_path])
 }

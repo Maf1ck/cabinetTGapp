@@ -138,6 +138,7 @@ main.page.menu
         p.empty(v-if='!dayMeals.length') На цей день страв немає.
         .menu__slot(v-for='m in dayMeals' :key='m.id')
           button.menu__item(type='button' :class='{ "is-eaten": m.eaten }' :aria-pressed='m.eaten' @click='toggle(m)')
+            img.menu__thumb(v-if='m.photoUrl' :src='m.photoUrl' alt='' loading='lazy')
             span.menu__item-text
               span.menu__item-type {{ MEAL_LABEL[m.meal] }}{{ m.at_time ? ` · ${hhmm(m.at_time)}` : '' }}
               b {{ m.title }}
@@ -353,7 +354,16 @@ main.page.menu
 
   &__item-text {
     display: flex;
+    flex: 1;
     flex-direction: column;
+  }
+
+  &__thumb {
+    flex: none;
+    width: 52px;
+    height: 52px;
+    border-radius: 12px;
+    object-fit: cover;
   }
 
   &__item-type {

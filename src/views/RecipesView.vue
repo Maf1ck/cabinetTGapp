@@ -9,7 +9,9 @@ import {
   getRecipe,
   listIngredients,
   listRecipes,
+  removeRecipePhoto,
   saveRecipe,
+  setRecipePhoto,
   type Ingredient,
   type Recipe,
   type RecipeDraft,
@@ -18,6 +20,7 @@ import {
 } from '@/api/recipes'
 import { normalize, UNITS } from '@/lib/recipes'
 import { plural } from '@/lib/dates'
+import { compressImage, MAX_UPLOAD_BYTES } from '@/lib/image'
 
 const route = useRoute()
 const router = useRouter()
@@ -209,7 +212,7 @@ async function remove() {
   const r = recipe.value
   if (!r || !window.confirm(`Видалити рецепт «${r.title}»? У вже складених меню страва лишиться, але без рецепта.`)) return
   try {
-    await deleteRecipe(r.id)
+    await deleteRecipe(r)
     recipes.value = recipes.value.filter((x) => x.id !== r.id)
     recipe.value = null
     router.push(base.value)
@@ -218,11 +221,64 @@ async function remove() {
   }
 }
 
+// ---------------------------------------------------------------- фото страви (нутриціолог)
+
+const photoInput = ref<HTMLInputElement | null>(null)
+const photoBusy = ref(false)
+const photoError = ref('')
+const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp']
+
+async function pickPhoto(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  const r = recipe.value
+  if (!file || !r) return
+  photoError.value = ''
+  if (!file.type.startsWith('image/')) {
+    photoError.value = 'Оберіть фото (JPG, PNG або WebP).'
+    return
+  }
+  photoBusy.value = true
+  try {
+    const blob = await compressImage(file)
+    if (!PHOTO_TYPES.includes(blob.type)) throw new Error('bad_type')
+    if (blob.size > MAX_UPLOAD_BYTES) throw new Error('too_big')
+    recipe.value = await setRecipePhoto(r, blob)
+  } catch (err) {
+    const code = err instanceof Error ? err.message : ''
+    photoError.value =
+      code === 'bad_type'
+        ? 'Цей формат не підходить — збережіть фото як JPG і спробуйте ще раз.'
+        : code === 'too_big'
+          ? 'Фото завелике навіть після стиснення.'
+          : 'Не вдалося завантажити фото. Спробуйте ще раз.'
+  } finally {
+    photoBusy.value = false
+  }
+}
+
+async function dropPhoto() {
+  const r = recipe.value
+  if (!r || !window.confirm('Прибрати фото страви?')) return
+  photoBusy.value = true
+  photoError.value = ''
+  try {
+    await removeRecipePhoto(r)
+    recipe.value = { ...r, photo_path: null, photoUrl: null }
+  } catch {
+    photoError.value = 'Не вдалося прибрати фото.'
+  } finally {
+    photoBusy.value = false
+  }
+}
+
 watch(
   selectedId,
   (id) => {
     editing.value = false
     recipe.value = null
+    photoError.value = ''
     if (id) loadRecipe(id)
   },
   { immediate: true },
@@ -343,6 +399,17 @@ main.page.recipes
       p.empty(v-if='recipeLoading') Відкриваємо рецепт…
       p.notice(v-else-if='recipeError' role='alert') {{ recipeError }}
       template(v-else-if='recipe')
+        .recipes__photo(v-if='recipe.photoUrl || canEdit' :class='{ "is-empty": !recipe.photoUrl }')
+          img(v-if='recipe.photoUrl' :src='recipe.photoUrl' :alt='recipe.title')
+          button.recipes__photo-add(v-else type='button' :disabled='photoBusy' @click='photoInput?.click()')
+            AppIcon(name='camera' :size='26')
+            span {{ photoBusy ? 'Завантажуємо…' : 'Додати фото страви' }}
+            small Клієнт побачить його в меню й на головній
+          .recipes__photo-actions(v-if='canEdit && recipe.photoUrl')
+            button.btn.btn--white.btn--sm(type='button' :disabled='photoBusy' @click='photoInput?.click()') {{ photoBusy ? 'Завантажуємо…' : 'Замінити фото' }}
+            button.btn.btn--white.btn--sm(type='button' :disabled='photoBusy' @click='dropPhoto') Прибрати
+          input.sr-only(v-if='canEdit' ref='photoInput' type='file' accept='image/jpeg,image/png,image/webp,image/*' @change='pickPhoto')
+        p.notice(v-if='photoError' role='alert') {{ photoError }}
         div
           .recipes__tags
             span.chip(v-if='recipe.category') {{ recipe.category }}
@@ -382,6 +449,61 @@ main.page.recipes
 @use '@/scss/variables' as *;
 
 .recipes {
+  &__photo {
+    position: relative;
+    overflow: hidden;
+    aspect-ratio: 16 / 9;
+    max-height: 320px;
+    margin: 4px 0 18px;
+    border-radius: 18px;
+    background: $bg-tint;
+
+    img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    &.is-empty {
+      aspect-ratio: auto;
+      border: 2px dashed $line-dashed;
+      background: $bg-soft;
+    }
+  }
+
+  &__photo-add {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 26px 16px;
+    border: 0;
+    background: transparent;
+    color: $text-nav;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+
+    small {
+      color: $text-faint;
+      font-weight: 400;
+    }
+
+    &:hover:not(:disabled) {
+      color: $accent;
+    }
+  }
+
+  &__photo-actions {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    display: flex;
+    gap: 6px;
+  }
+
   &__layout {
     display: flex;
     flex-wrap: wrap;

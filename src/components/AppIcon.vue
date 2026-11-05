@@ -24,6 +24,7 @@ const PATHS = {
   chevronRight: ['M9 6l6 6-6 6'],
   copy: ['M9 9h11v11H9z', 'M5 15H4V4h11v1'],
   leaf: ['M5 19c0-8 5-13 14-14-1 9-6 14-14 14z', 'M5 19l7-7'],
+  bulb: ['M9 18h6', 'M10 21h4', 'M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3z'],
 } as const
 
 export type IconName = keyof typeof PATHS
