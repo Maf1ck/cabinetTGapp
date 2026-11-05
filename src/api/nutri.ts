@@ -12,6 +12,8 @@ export interface ClientRow {
   program_title: string | null
   program_week: number | null
   program_weeks: number | null
+  /** на супроводі: «зʼїдено» клієнт ставить лише з фото або коментарем */
+  on_support: boolean
   active: boolean
   user_id: string | null
   created_at: string
@@ -23,6 +25,7 @@ export interface ClientDraft {
   program_title: string | null
   program_week: number | null
   program_weeks: number | null
+  on_support: boolean
 }
 
 export interface ScheduleItem {
@@ -44,6 +47,8 @@ export interface DiaryItem {
   fullness: number | null
   mood: string | null
   seen_by_nutri: boolean
+  /** страва меню, про яку звіт (клієнт відмітив її «зʼїдено») */
+  menu_meal_id: string | null
   /** скільки коментарів Анастасії вже є */
   comments: number
   client: { id: string; full_name: string } | null
@@ -55,7 +60,7 @@ export interface DiaryDetails {
   planned: { title: string; recipe_id: string | null; eaten: boolean } | null
 }
 
-const CLIENT_FIELDS = 'id, full_name, goal, program_title, program_week, program_weeks, active, user_id, created_at'
+const CLIENT_FIELDS = 'id, full_name, goal, program_title, program_week, program_weeks, on_support, active, user_id, created_at'
 
 export async function listClients(): Promise<ClientRow[]> {
   return must(await supabase().from('clients').select(CLIENT_FIELDS).order('full_name'))
@@ -134,7 +139,7 @@ export async function listDiary(f: DiaryFilter = {}): Promise<DiaryItem[]> {
   let q = supabase()
     .from('diary_entries')
     .select(
-      'id, meal, note, taken_at, photo_path, hunger, fullness, mood, seen_by_nutri, client:clients(id, full_name), diary_comments(count)',
+      'id, meal, note, taken_at, photo_path, hunger, fullness, mood, seen_by_nutri, menu_meal_id, client:clients(id, full_name), diary_comments(count)',
     )
     .order('taken_at', { ascending: false })
     .limit(f.limit ?? 60)
@@ -161,9 +166,18 @@ export const listUnseenDiary = (limit = 6) => listDiary({ unseenOnly: true, limi
 
 export async function getDiaryDetails(entry: DiaryItem): Promise<DiaryDetails> {
   const taken = new Date(entry.taken_at)
+  // звіт про страву з меню знає її напряму; давніші записи — шукаємо за днем і прийомом їжі
+  const linked = entry.menu_meal_id
+    ? supabase()
+        .from('menu_meals')
+        .select('title, recipe_id, meal_checks(meal_id)')
+        .eq('id', entry.menu_meal_id)
+        .maybeSingle()
+    : null
   const [comments, planned] = await Promise.all([
     supabase().from('diary_comments').select('id, body, created_at').eq('entry_id', entry.id).order('created_at'),
-    entry.meal && entry.client
+    linked ??
+    (entry.meal && entry.client
       ? supabase()
           .from('menu_meals')
           .select('title, recipe_id, menus!inner(client_id, week_start), meal_checks(meal_id)')
@@ -173,7 +187,7 @@ export async function getDiaryDetails(entry: DiaryItem): Promise<DiaryDetails> {
           .eq('meal', entry.meal)
           .limit(1)
           .maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
+      : Promise.resolve({ data: null, error: null })),
   ])
   const row = must(planned) as { title: string; recipe_id: string | null; meal_checks: unknown[] | unknown | null } | null
   return {

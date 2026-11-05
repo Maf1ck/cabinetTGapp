@@ -28,6 +28,7 @@ const emptyDraft = (): ClientDraft => ({
   program_title: 'Супровід',
   program_week: 1,
   program_weeks: 4,
+  on_support: true,
 })
 const draft = ref<ClientDraft>(emptyDraft())
 const editing = ref(false)
@@ -79,6 +80,7 @@ function clean(d: ClientDraft): ClientDraft {
     program_title: d.program_title?.trim() || null,
     program_week: num(d.program_week),
     program_weeks: num(d.program_weeks),
+    on_support: d.on_support,
   }
 }
 
@@ -127,6 +129,7 @@ function startEdit() {
     program_title: c.program_title ?? '',
     program_week: c.program_week,
     program_weeks: c.program_weeks,
+    on_support: c.on_support,
   }
   formError.value = ''
   editing.value = true
@@ -246,6 +249,11 @@ main.page.clients
           label.field
             | Тижнів усього
             input(v-model.number='draft.program_weeks' type='number' min='1' max='52')
+        label.clients__check
+          input(v-model='draft.on_support' type='checkbox')
+          span
+            b На супроводі
+            small Відмічаючи страву зʼїденою, клієнт обовʼязково надсилає фото тарілки або коментар — він зʼявиться у «Нових записах».
         p.notice(v-if='formError' role='alert') {{ formError }}
         .clients__actions
           button.btn.btn--primary(type='submit' :disabled='saving') {{ saving ? 'Зберігаємо…' : editing ? 'Зберегти' : 'Створити клієнта' }}
@@ -271,6 +279,9 @@ main.page.clients
         div
           span Програма
           b {{ programLabel(selected) || '—' }}
+        div
+          span Звіт про страви
+          b {{ selected.on_support ? 'Фото або коментар до кожної' : 'Лише відмітка «зʼїдено»' }}
 
       //- запрошення
       .clients__invite(v-if='selected.active && !selected.user_id')
@@ -442,6 +453,32 @@ main.page.clients
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  &__check {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    cursor: pointer;
+
+    input {
+      flex: none;
+      width: 18px;
+      height: 18px;
+      margin-top: 2px;
+      accent-color: $accent;
+    }
+
+    span {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    small {
+      color: $text-muted;
+      font-size: 13px;
+    }
   }
 
   &__labs {

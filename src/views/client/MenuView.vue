@@ -2,7 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import { useAuth } from '@/stores/auth'
 import AppIcon from '@/components/AppIcon.vue'
-import { getWeekMenu, setMealEaten, type Meal } from '@/api/client'
+import MealReportModal from '@/components/MealReportModal.vue'
+import { getClientCard, getWeekMenu, setMealEaten, type Meal } from '@/api/client'
 import { addDays, DAY_SHORT, isoDate, shortDate, weekday, weekStart } from '@/lib/dates'
 import { hhmm, MEAL_LABEL, MEALS } from '@/lib/meals'
 
@@ -18,6 +19,10 @@ const loading = ref(true)
 const loadError = ref(false)
 const saveError = ref(false)
 const meals = ref<Meal[] | null>(null)
+/** на супроводі: «зʼїдено» — лише з фото або коментарем */
+const onSupport = ref(false)
+/** страва, про яку зараз надсилають звіт */
+const reporting = ref<Meal | null>(null)
 
 const isThisWeek = computed(() => isoDate(monday.value) === isoDate(thisMonday))
 const weekDays = computed(() =>
@@ -32,11 +37,20 @@ const rows = computed(() => MEALS.filter((t) => meals.value?.some((m) => m.meal 
 const cell = (day: number, meal: string) => meals.value?.find((m) => m.day === day && m.meal === meal)
 const dayMeals = computed(() => (meals.value ?? []).filter((m) => m.day === selectedDay.value))
 
+let cardLoaded = false
 async function load() {
   loading.value = true
   loadError.value = false
   try {
-    meals.value = await getWeekMenu(clientId, isoDate(monday.value))
+    const [m, card] = await Promise.all([
+      getWeekMenu(clientId, isoDate(monday.value)),
+      cardLoaded ? null : getClientCard(clientId),
+    ])
+    meals.value = m
+    if (card) {
+      onSupport.value = card.on_support
+      cardLoaded = true
+    }
   } catch {
     loadError.value = true
   } finally {
@@ -53,10 +67,19 @@ const goThisWeek = () => setWeek(thisMonday)
 
 // Шаблон pug у dev іде як чистий JS — без `!`/`as`, тому приймаємо й undefined
 const cellTitle = (m: Meal | undefined) =>
-  m?.eaten ? 'Зʼїдено — натисніть, щоб зняти відмітку' : 'Натисніть, щоб відмітити зʼїденим'
+  m?.eaten
+    ? 'Зʼїдено — натисніть, щоб зняти відмітку'
+    : onSupport.value
+      ? 'Натисніть, щоб надіслати фото чи коментар і відмітити зʼїденим'
+      : 'Натисніть, щоб відмітити зʼїденим'
 
 async function toggle(meal: Meal | undefined) {
   if (!meal) return
+  // на супроводі «зʼїдено» ставиться лише разом зі звітом (фото або коментар)
+  if (!meal.eaten && onSupport.value) {
+    reporting.value = meal
+    return
+  }
   meal.eaten = !meal.eaten
   saveError.value = false
   try {
@@ -65,6 +88,11 @@ async function toggle(meal: Meal | undefined) {
     meal.eaten = !meal.eaten
     saveError.value = true
   }
+}
+
+function onReported() {
+  if (reporting.value) reporting.value.eaten = true
+  reporting.value = null
 }
 
 watch(monday, load, { immediate: true })
@@ -159,8 +187,18 @@ main.page.menu
           li #[i.is-carb] ¼ крупи, хліб, картопля
     section.card.menu__help
       h2.card__title Як користуватися
-      p.menu__help-text Натисніть на страву, щоб відмітити її з'їденою, — Анастасія бачить, як вам вдається триматися плану.
+      p.menu__help-text(v-if='onSupport') Натисніть на страву й надішліть фото тарілки (або коментар, якщо без фото) — так вона відмітиться з'їденою, а Анастасія побачить, як вам вдається триматися плану.
+      p.menu__help-text(v-else) Натисніть на страву, щоб відмітити її з'їденою, — Анастасія бачить, як вам вдається триматися плану.
       RouterLink.btn.btn--soft(to='/c/chat') Попросити замінити страву
+
+  MealReportModal(
+    v-if='reporting'
+    :client-id='clientId'
+    :meal='reporting'
+    :week-monday='monday'
+    @close='reporting = null'
+    @done='onReported'
+  )
 </template>
 
 <style lang="scss">

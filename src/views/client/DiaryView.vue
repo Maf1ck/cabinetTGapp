@@ -3,7 +3,16 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAuth } from '@/stores/auth'
 import AppIcon from '@/components/AppIcon.vue'
 import HintCard from '@/components/HintCard.vue'
-import { addDiaryEntry, deleteDiaryEntry, getDiary, getWeekMenu, setMealEaten, type DiaryEntry, type Meal } from '@/api/client'
+import {
+  addDiaryEntry,
+  deleteDiaryEntry,
+  getClientCard,
+  getDiary,
+  getWeekMenu,
+  setMealEaten,
+  type DiaryEntry,
+  type Meal,
+} from '@/api/client'
 import { addDays, DAY_SHORT, days, fromIso, isoDate, streak, timeOf, weekday, weekStart } from '@/lib/dates'
 import { dueMeals, hhmm, MEAL_LABEL, MEAL_TIME, MEALS, mealByTime, type MealType } from '@/lib/meals'
 import { compressImage, MAX_UPLOAD_BYTES } from '@/lib/image'
@@ -38,6 +47,8 @@ const preview = ref<string | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const saving = ref(false)
 const formError = ref('')
+/** на супроводі: страва з меню відмічається «зʼїдено» лише з фото або власним коментарем */
+const onSupport = ref(false)
 
 // ---- меню: що Анастасія запланувала на обраний день
 /** week_start → страви опублікованого меню (null — меню на тиждень немає) */
@@ -92,7 +103,11 @@ const byDay = computed(() => {
 const dayEntries = computed(() => byDay.value.get(selected.value) ?? [])
 const series = computed(() => streak(byDay.value.keys(), now))
 const isToday = computed(() => selected.value === todayIso)
-const canSave = computed(() => !saving.value && (photo.value || note.value.trim()))
+/** обрали страву з меню, але лишили тільки її назву — для супроводу цього замало */
+const needsReport = computed(
+  () => onSupport.value && !!fromMenu.value && !photo.value && note.value.trim() === fromMenu.value.title,
+)
+const canSave = computed(() => !saving.value && !needsReport.value && (photo.value || note.value.trim()))
 // «Перекус» є двічі (до і після обіду), тож показуємо поруч звичайний час
 const mealOptions = MEALS.map((m) => ({ value: m, label: `${MEAL_LABEL[m]} · ${MEAL_TIME[m]}` }))
 
@@ -100,8 +115,13 @@ async function load() {
   loading.value = true
   loadError.value = false
   try {
-    const [diary] = await Promise.all([getDiary(clientId, from, addDays(now, 1)), loadMenus()])
+    const [diary, card] = await Promise.all([
+      getDiary(clientId, from, addDays(now, 1)),
+      getClientCard(clientId),
+      loadMenus(),
+    ])
     entries.value = diary
+    onSupport.value = card.on_support
   } catch {
     loadError.value = true
   } finally {
@@ -168,6 +188,7 @@ async function save() {
         fullness: fullness.value,
         mood: mood.value,
         taken_at: takenAt(),
+        menu_meal_id: fromMenu.value?.id ?? null,
       },
       blob,
     )
@@ -194,6 +215,14 @@ async function remove(entry: DiaryEntry) {
   try {
     await deleteDiaryEntry(entry)
     entries.value = entries.value.filter((e) => e.id !== entry.id)
+    // на супроводі «зʼїдено» тримається на звіті: видалили останній — знімаємо й відмітку
+    const mealId = entry.menu_meal_id
+    if (onSupport.value && mealId && !entries.value.some((e) => e.menu_meal_id === mealId)) {
+      const planned = [...menus.value.values()].flatMap((w) => w ?? []).find((m) => m.id === mealId)
+      await setMealEaten(clientId, mealId, false)
+        .then(() => planned && (planned.eaten = false))
+        .catch(() => {})
+    }
   } catch {
     formError.value = 'Не вдалося видалити запис.'
   }
@@ -216,7 +245,8 @@ main.page.diary
   HintCard(id='diary' title='Як вести щоденник')
     ul
       li Оберіть страву з меню — вона сама відмітиться зʼїденою. Їли інше — просто опишіть.
-      li Фото необовʼязкове, але так Анастасії легше підказати.
+      li(v-if='onSupport') Ви на супроводі: до страви з меню додайте фото тарілки, а якщо сфотографувати не вийшло — допишіть коментар.
+      li(v-else) Фото необовʼязкове, але так Анастасії легше підказати.
       li Голод, ситість і настрій важливіші за калорії: відмічайте, як почувались.
       li Забули записати? Оберіть потрібний день угорі.
 
@@ -317,7 +347,8 @@ main.page.diary
 
       p.notice(v-if='formError' role='alert') {{ formError }}
       button.btn.btn--primary(type='submit' :disabled='!canSave') {{ saving ? 'Зберігаємо…' : 'Зберегти запис' }}
-      p.diary__hint(v-if='!photo && !note.trim()') Додайте фото або напишіть, що їли.
+      p.diary__hint(v-if='needsReport') Додайте фото тарілки або допишіть коментар до страви — без цього її не відмітити зʼїденою.
+      p.diary__hint(v-else-if='!photo && !note.trim()') Додайте фото або напишіть, що їли.
 </template>
 
 <style lang="scss">

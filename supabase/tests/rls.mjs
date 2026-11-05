@@ -124,6 +124,32 @@ check('Клієнт не може поставити «переглянуто»'
 await as(NUTRI, `update diary_entries set seen_by_nutri = true where client_id='${C1}'`)
 check('Анастасія ставить «переглянуто»', (await db.query(`select count(*)::int n from diary_entries where seen_by_nutri`)).rows[0].n, 2)
 
+// «Зʼїдено» для клієнта на супроводі — лише зі звітом (фото або власний коментар)
+const MEAL = (await db.query(`select id from menu_meals where title = 'Вівсянка'`)).rows[0].id
+const eat = () => as(MARIA, `insert into meal_checks (meal_id, client_id) values ('${MEAL}', '${C1}') returning 1`)
+const report = (cols, vals) =>
+  as(MARIA, `insert into diary_entries (client_id, meal, menu_meal_id, ${cols}) values ('${C1}', 'breakfast', '${MEAL}', ${vals}) returning id`)
+const noReport = await eat()
+check('На супроводі: без звіту «зʼїдено» не ставиться', typeof noReport === 'string' && noReport.includes('row-level security'), true)
+await report('note', `'Вівсянка'`)
+check('Назва страви замість коментаря — не звіт', typeof (await eat()) === 'string', true)
+await report('photo_path', `'${C2}/b.jpg'`)
+check('Фото з чужої папки — не звіт', typeof (await eat()) === 'string', true)
+const [noted] = await report('note', `'Зʼїла половину, не встигла сфотографувати'`)
+check('З коментарем «зʼїдено» ставиться', Array.isArray(await eat()), true)
+check('Марія знімає свою відмітку', Array.isArray(await as(MARIA, `delete from meal_checks where meal_id='${MEAL}' returning 1`)), true)
+await db.exec(`delete from diary_entries where id = '${noted.id}'`)
+await report('photo_path', `'${C1}/a.jpg'`)
+check('З фото «зʼїдено» ставиться', Array.isArray(await eat()), true)
+await db.exec(`delete from meal_checks; delete from diary_entries where menu_meal_id is not null`)
+await db.exec(`update clients set on_support = false where id = '${C1}'`)
+check('Не на супроводі: «зʼїдено» без звіту', Array.isArray(await eat()), true)
+await db.exec(`delete from meal_checks; update clients set on_support = true where id = '${C1}'`)
+check('Нутриціолог ставить «зʼїдено» без звіту', Array.isArray(await as(NUTRI, `insert into meal_checks (meal_id, client_id) values ('${MEAL}', '${C1}') returning 1`)), true)
+check('Марія бачить свою відмітку', await count(MARIA, 'select * from meal_checks'), 1)
+check('Олег не бачить відміток Марії', await count(OLEG, 'select * from meal_checks'), 0)
+await db.exec(`delete from meal_checks`)
+
 // Вимкнений клієнт: сесія ще жива, але даних уже не бачить
 await db.exec(`update clients set active = false where id = '${C1}'`)
 check('Вимкнена Марія не бачить свого щоденника', await count(MARIA, 'select * from diary_entries'), 0)

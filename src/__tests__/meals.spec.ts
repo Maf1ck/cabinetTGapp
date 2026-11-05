@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dueMeals, type MealType } from '@/lib/meals'
+import { dueMeals, reportNote, reportTime, type MealType } from '@/lib/meals'
 
 const m = (meal: MealType, at_time: string | null = null) => ({ meal, at_time, title: meal })
 const menu = [m('dinner'), m('breakfast', '08:00:00'), m('lunch', '13:30:00'), m('snack1')]
@@ -21,5 +21,27 @@ describe('dueMeals — що вже можна записати в щоденни
 
   it('рано вранці — ще нічого', () => {
     expect(dueMeals(menu, new Date(2026, 10, 5), new Date(2026, 10, 5, 6, 0))).toEqual([])
+  })
+})
+
+describe('звіт про зʼїдену страву', () => {
+  const monday = new Date(2026, 10, 2)
+  const now = new Date(2026, 10, 5, 13, 10)
+
+  it('нотатка: назва страви і коментар клієнта', () => {
+    expect(reportNote('Вівсянка', '  зʼїла половину ')).toBe('Вівсянка — зʼїла половину')
+    expect(reportNote('Вівсянка', '   ')).toBe('Вівсянка')
+  })
+
+  it('минула страва — на її час у меню', () => {
+    const lunch = { day: 2, meal: 'lunch', at_time: '13:30:00' } as const
+    expect(reportTime(monday, lunch, now)).toEqual(new Date(2026, 10, 3, 13, 30))
+    const dinner = { day: 1, meal: 'dinner', at_time: null } as const
+    expect(reportTime(monday, dinner, now)).toEqual(new Date(2026, 10, 2, 19, 0))
+  })
+
+  it('сьогоднішня й майбутня — зараз', () => {
+    expect(reportTime(monday, { day: 4, meal: 'dinner', at_time: null }, now)).toBe(now)
+    expect(reportTime(monday, { day: 6, meal: 'lunch', at_time: null }, now)).toBe(now)
   })
 })
