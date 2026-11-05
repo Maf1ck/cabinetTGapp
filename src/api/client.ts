@@ -2,6 +2,9 @@
 import { supabase } from '@/lib/supabase'
 import { isoDate } from '@/lib/dates'
 import type { MealType } from '@/lib/meals'
+import { notify } from './notify'
+import { normalize } from '@/lib/recipes'
+import { buildShoppingList, type ShopLine, type ShopRecipe } from '@/lib/shopping'
 
 type Result<T> = { data: T | null; error: unknown }
 
@@ -41,6 +44,17 @@ export interface ShoppingItem {
   name: string
   amount: string | null
   checked: boolean
+  category: string | null
+  /** зібрано з рецептів меню; false — клієнт додав сам */
+  from_menu: boolean
+}
+
+export interface ShoppingList {
+  items: ShoppingItem[]
+  /** чи є опубліковане меню на цей тиждень */
+  hasMenu: boolean
+  /** страви меню без рецепта — їх інгредієнтів у списку немає */
+  withoutRecipe: string[]
 }
 
 export interface Habit {
@@ -148,16 +162,102 @@ export async function setMealEaten(clientId: string, mealId: string, eaten: bool
 
 // ---------------------------------------------------------------- покупки й звички
 
+const SHOP_FIELDS = 'id, name, amount, checked, category, from_menu'
+
+type RecipeRow = {
+  id: string
+  servings: string | null
+  lines: { name: string; qty_from: number | null; qty_to: number | null; unit: string | null; ingredient: { category: string | null } | null }[]
+}
+
+/** Що треба купити за опублікованим меню; null — меню на тиждень ще немає. */
+async function linesFromMenu(clientId: string, weekStart: string): Promise<{ lines: ShopLine[]; withoutRecipe: string[] } | null> {
+  const menu = must(
+    await supabase().from('menus').select('id').eq('client_id', clientId).eq('week_start', weekStart).maybeSingle(),
+  ) as { id: string } | null
+  if (!menu) return null
+  const meals = must(
+    await supabase().from('menu_meals').select('title, recipe_id').eq('menu_id', menu.id),
+  ) as { title: string; recipe_id: string | null }[]
+  const ids = meals.flatMap((m) => (m.recipe_id ? [m.recipe_id] : []))
+  const recipes = new Map<string, ShopRecipe>()
+  if (ids.length) {
+    const rows = must(
+      await supabase()
+        .from('recipes')
+        .select('id, servings, lines:recipe_ingredients(name, qty_from, qty_to, unit, ingredient:ingredients(category))')
+        .in('id', [...new Set(ids)]),
+    ) as unknown as RecipeRow[]
+    for (const r of rows)
+      recipes.set(r.id, {
+        id: r.id,
+        servings: r.servings,
+        lines: r.lines.map(({ ingredient, ...l }) => ({ ...l, category: ingredient?.category ?? null })),
+      })
+  }
+  return {
+    lines: buildShoppingList(ids, recipes),
+    withoutRecipe: [...new Set(meals.filter((m) => !m.recipe_id).map((m) => m.title))],
+  }
+}
+
+/**
+ * Список покупок на тиждень. Рядки «з меню» звіряються з поточним меню: нові додаються,
+ * зайві прибираються, кількості оновлюються; відмітки «куплено» і свої пункти клієнта лишаються.
+ */
+export async function getShoppingList(clientId: string, weekStart: string): Promise<ShoppingList> {
+  const table = () => supabase().from('shopping_items')
+  const [plan, current] = await Promise.all([
+    linesFromMenu(clientId, weekStart),
+    table().select(SHOP_FIELDS).eq('client_id', clientId).eq('week_start', weekStart),
+  ])
+  let items = must(current) as ShoppingItem[]
+
+  if (plan) {
+    const have = new Map(items.filter((i) => i.from_menu).map((i) => [normalize(i.name), i]))
+    const want = new Map(plan.lines.map((l) => [normalize(l.name), l]))
+    const add = plan.lines.filter((l) => !have.has(normalize(l.name)))
+    const drop = [...have].filter(([k]) => !want.has(k)).map(([, i]) => i.id)
+    const changed = [...have].flatMap(([k, i]) => {
+      const l = want.get(k)
+      return l && (l.amount !== i.amount || l.category !== i.category) ? [{ id: i.id, amount: l.amount, category: l.category }] : []
+    })
+    if (add.length)
+      must(
+        await table().insert(
+          add.map((l) => ({ client_id: clientId, week_start: weekStart, name: l.name, amount: l.amount, category: l.category, from_menu: true })),
+        ),
+      )
+    if (drop.length) must(await table().delete().in('id', drop))
+    for (const c of changed) must(await table().update({ amount: c.amount, category: c.category }).eq('id', c.id))
+    if (add.length || drop.length || changed.length)
+      items = must(await table().select(SHOP_FIELDS).eq('client_id', clientId).eq('week_start', weekStart)) as ShoppingItem[]
+  }
+
+  items.sort((a, b) => Number(a.checked) - Number(b.checked) || a.name.localeCompare(b.name, 'uk'))
+  return { items, hasMenu: !!plan, withoutRecipe: plan?.withoutRecipe ?? [] }
+}
+
 export async function getShopping(clientId: string, weekStart: string): Promise<ShoppingItem[]> {
+  return (await getShoppingList(clientId, weekStart)).items
+}
+
+export async function addShoppingItem(clientId: string, weekStart: string, name: string, amount: string | null): Promise<ShoppingItem> {
   return must(
     await supabase()
       .from('shopping_items')
-      .select('id, name, amount, checked')
-      .eq('client_id', clientId)
-      .eq('week_start', weekStart)
-      .order('checked')
-      .order('name'),
+      .insert({ client_id: clientId, week_start: weekStart, name, amount, from_menu: false })
+      .select(SHOP_FIELDS)
+      .single(),
   )
+}
+
+export async function deleteShoppingItem(id: string): Promise<void> {
+  must(await supabase().from('shopping_items').delete().eq('id', id))
+}
+
+export async function setShoppingAllChecked(ids: string[], checked: boolean): Promise<void> {
+  if (ids.length) must(await supabase().from('shopping_items').update({ checked }).in('id', ids))
 }
 
 export async function setShoppingChecked(id: string, checked: boolean): Promise<void> {
@@ -285,6 +385,7 @@ export async function addDiaryEntry(clientId: string, draft: DiaryDraft, photo: 
     throw error
   }
   const [entry] = await withPhotos([data as Omit<DiaryEntry, 'photoUrl'>])
+  notify('diary_entry', entry!.id)
   return entry!
 }
 

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/AppIcon.vue'
+import LabFiles from '@/components/LabFiles.vue'
 import {
   createClientCard,
   createInviteLink,
@@ -286,8 +287,13 @@ main.page.clients
 
       .clients__actions
         RouterLink.btn.btn--primary(v-if='selected.active' :to='{ path: "/n/builder", query: { client: selected.id } }') Скласти меню
+        RouterLink.btn.btn--ghost(v-if='selected.user_id' :to='{ path: "/n/diaries", query: { client: selected.id } }') Щоденник
         button.btn.btn--ghost(type='button' @click='startEdit') Редагувати
         button.btn.btn--ghost(type='button' @click='toggleActive') {{ selected.active ? 'Призупинити доступ' : 'Відновити доступ' }}
+
+      .clients__labs(v-if='selected.user_id')
+        h3.clients__subtitle Аналізи
+        LabFiles(:client-id='selected.id')
 
     section.card.clients__placeholder(v-else-if='clients.length')
       p.empty Оберіть клієнта зі списку або додайте нового.
@@ -436,6 +442,24 @@ main.page.clients
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  &__labs {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 16px;
+    border-top: 1px solid $line;
+  }
+
+  &__subtitle {
+    margin: 0;
+    font-family: $font-body;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: $text-muted;
   }
 
   &__hint,

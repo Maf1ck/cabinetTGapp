@@ -49,7 +49,7 @@ describe('TodayView', () => {
     api.getWater.mockResolvedValue(3)
     api.getWellbeing.mockResolvedValue({ energy: 4, sleep: null, digestion: null, mood: null })
     api.getWeekMenu.mockResolvedValue([meal('m1', 'Курка, булгур, салат', true), meal('m2', 'Запечена риба')])
-    api.getShopping.mockResolvedValue([{ id: 's1', name: 'Булгур', amount: null, checked: false }])
+    api.getShopping.mockResolvedValue([{ id: 's1', name: 'Булгур', amount: null, checked: false, category: null, from_menu: false }])
     api.getHabitsWeek.mockResolvedValue([])
     api.getDiaryDays.mockResolvedValue([isoDate(today)])
     for (const f of [api.setWater, api.setWellbeing, api.setMealEaten, api.setShoppingChecked, api.setHabitDone])

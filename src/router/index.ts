@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 import { useAuth } from '@/stores/auth'
 
 declare module 'vue-router' {
@@ -10,11 +10,6 @@ declare module 'vue-router' {
 
 const SoonView = () => import('@/views/SoonView.vue')
 const RecipesView = () => import('@/views/RecipesView.vue')
-const soon = (path: string, title: string): RouteRecordRaw => ({
-  path,
-  component: SoonView,
-  props: { title },
-})
 
 const router = createRouter({
   history: createWebHistory(),
@@ -35,10 +30,10 @@ const router = createRouter({
         { path: '', name: 'client-today', component: () => import('@/views/client/TodayView.vue') },
         { path: 'menu', name: 'client-menu', component: () => import('@/views/client/MenuView.vue') },
         { path: 'diary', name: 'client-diary', component: () => import('@/views/client/DiaryView.vue') },
-        soon('shop', 'Список покупок'),
+        { path: 'shop', name: 'client-shop', component: () => import('@/views/client/ShopView.vue') },
         { path: 'recipes/:id?', name: 'client-recipes', component: RecipesView },
-        soon('tests', 'Мої аналізи'),
-        soon('chat', 'Чат з нутриціологом'),
+        { path: 'tests', name: 'client-tests', component: () => import('@/views/client/TestsView.vue') },
+        { path: 'chat', name: 'client-chat', component: () => import('@/views/client/ChatView.vue') },
       ],
     },
     {
@@ -48,11 +43,11 @@ const router = createRouter({
       children: [
         { path: '', name: 'nutri-overview', component: () => import('@/views/nutri/OverviewView.vue') },
         { path: 'clients/:id?', name: 'nutri-clients', component: () => import('@/views/nutri/ClientsView.vue') },
-        soon('diaries', 'Щоденники'),
+        { path: 'diaries', name: 'nutri-diaries', component: () => import('@/views/nutri/DiariesView.vue') },
         { path: 'calendar', name: 'nutri-calendar', component: () => import('@/views/nutri/CalendarView.vue') },
         { path: 'builder', name: 'nutri-builder', component: () => import('@/views/nutri/BuilderView.vue') },
         { path: 'recipes/:id?', name: 'nutri-recipes', component: RecipesView },
-        soon('payments', 'Оплати'),
+        { path: 'payments', name: 'nutri-payments', component: () => import('@/views/nutri/PaymentsView.vue') },
       ],
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },

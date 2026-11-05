@@ -142,6 +142,7 @@ check('Клієнт не бачить invites', await count(MARIA, 'select * fro
 check('Навіть Анастасія не читає invites з клієнтської сторони', await count(NUTRI, 'select * from invites'), 0)
 check('Клієнт не бачить login_tokens', await count(MARIA, 'select * from login_tokens'), 0)
 check('Клієнт не бачить notifications', await count(MARIA, 'select * from notifications'), 0)
+check('Клієнт не бачить notification_log', await count(MARIA, 'select * from notification_log'), 0)
 
 // Сховище
 check('Марія бачить лише свої файли', await count(MARIA, `select * from storage.objects where bucket_id='diary'`), 1)

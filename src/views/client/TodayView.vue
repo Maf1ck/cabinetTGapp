@@ -74,6 +74,8 @@ const water = ref(0)
 const wellbeing = ref<Wellbeing>({ energy: null, sleep: null, digestion: null, mood: null })
 const meals = ref<Meal[] | null>(null)
 const shopping = ref<ShoppingItem[]>([])
+// на головній — лише перші некуплені, решта на сторінці «Список покупок»
+const shoppingShown = computed(() => shopping.value.filter((i) => !i.checked).slice(0, 6))
 const habits = ref<Habit[]>([])
 const diaryStreak = ref(0)
 const selectedDay = ref(todayWd)
@@ -283,9 +285,11 @@ main.page.today
           h2.card__title Список покупок
           span.today__hint з меню на тиждень
         p.empty(v-if='!shopping.length') Список зʼявиться разом із меню.
-        label.today__check(v-for='item in shopping' :key='item.id' :class='{ "is-on": item.checked }')
+        label.today__check(v-for='item in shoppingShown' :key='item.id' :class='{ "is-on": item.checked }')
           input(type='checkbox' :checked='item.checked' @change='toggleItem(item)')
           span {{ item.name }}{{ item.amount ? `, ${item.amount}` : '' }}
+        RouterLink.today__more(v-if='shopping.length' to='/c/shop')
+          | {{ shopping.length > shoppingShown.length ? `Увесь список (ще ${shopping.length - shoppingShown.length}) →` : 'Увесь список →' }}
 
       section.card.today__habits
         h2.card__title Звички тижня

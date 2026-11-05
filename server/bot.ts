@@ -1,6 +1,7 @@
 import { Bot, InlineKeyboard } from 'grammy'
 import { acceptInvite, confirmLogin, db, resolveAccount } from './accounts.js'
 import { appUrl, env, ownerTgId } from './env.js'
+import { sendOnce, texts } from './notify.js'
 import { parseStartPayload } from './telegram.js'
 
 const CONTACT = '@nk_1802'
@@ -47,6 +48,10 @@ export function createBot(): Bot {
     if (payload.kind === 'invite') {
       const result = await acceptInvite(sb, from, payload.code, owner)
       if (result.ok) {
+        // Анастасії — що людина приєдналась (не критично: збій не заважає клієнту)
+        await sendOnce(sb, `joined:${from.id}`, owner, { text: texts.joined(result.fullName), path: '/n/clients' }).catch(
+          (e: Error) => console.error('notify joined', e.message),
+        )
         await ctx.reply(
           `Вітаю, ${result.fullName}! 🌿\nВаш кабінет готовий: меню, щоденник харчування і зв'язок з Анастасією.`,
           { reply_markup: openButton() },

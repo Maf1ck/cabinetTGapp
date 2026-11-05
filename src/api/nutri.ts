@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { isoDate, weekday, weekStart } from '@/lib/dates'
 import type { MealType } from '@/lib/meals'
 import { must, type Wellbeing } from './client'
+import { notify } from './notify'
 
 export interface ClientRow {
   id: string
@@ -42,6 +43,9 @@ export interface DiaryItem {
   hunger: number | null
   fullness: number | null
   mood: string | null
+  seen_by_nutri: boolean
+  /** скільки коментарів Анастасії вже є */
+  comments: number
   client: { id: string; full_name: string } | null
 }
 
@@ -116,15 +120,28 @@ export async function countUnseenDiary(): Promise<number> {
   return count ?? 0
 }
 
-export async function listUnseenDiary(limit = 6): Promise<DiaryItem[]> {
-  const rows = must(
-    await supabase()
-      .from('diary_entries')
-      .select('id, meal, note, taken_at, photo_path, hunger, fullness, mood, client:clients(id, full_name)')
-      .eq('seen_by_nutri', false)
-      .order('taken_at', { ascending: false })
-      .limit(limit),
-  ) as unknown as Omit<DiaryItem, 'photoUrl'>[]
+type DiaryRow = Omit<DiaryItem, 'photoUrl' | 'comments'> & { diary_comments: { count: number }[] }
+
+export interface DiaryFilter {
+  clientId?: string | null
+  unseenOnly?: boolean
+  since?: Date
+  limit?: number
+}
+
+/** Записи щоденників усіх клієнтів (або одного), найновіші першими, з підписаними фото. */
+export async function listDiary(f: DiaryFilter = {}): Promise<DiaryItem[]> {
+  let q = supabase()
+    .from('diary_entries')
+    .select(
+      'id, meal, note, taken_at, photo_path, hunger, fullness, mood, seen_by_nutri, client:clients(id, full_name), diary_comments(count)',
+    )
+    .order('taken_at', { ascending: false })
+    .limit(f.limit ?? 60)
+  if (f.clientId) q = q.eq('client_id', f.clientId)
+  if (f.unseenOnly) q = q.eq('seen_by_nutri', false)
+  if (f.since) q = q.gte('taken_at', f.since.toISOString())
+  const rows = must(await q) as unknown as DiaryRow[]
 
   // Фото в приватному бакеті: короткоживучі підписані посилання
   const paths = rows.map((r) => r.photo_path).filter((p): p is string => !!p)
@@ -133,8 +150,14 @@ export async function listUnseenDiary(limit = 6): Promise<DiaryItem[]> {
     const { data } = await supabase().storage.from('diary').createSignedUrls(paths, 3600)
     for (const s of data ?? []) if (s.path && s.signedUrl) urls.set(s.path, s.signedUrl)
   }
-  return rows.map((r) => ({ ...r, photoUrl: r.photo_path ? (urls.get(r.photo_path) ?? null) : null }))
+  return rows.map(({ diary_comments, ...r }) => ({
+    ...r,
+    comments: diary_comments[0]?.count ?? 0,
+    photoUrl: r.photo_path ? (urls.get(r.photo_path) ?? null) : null,
+  }))
 }
+
+export const listUnseenDiary = (limit = 6) => listDiary({ unseenOnly: true, limit })
 
 export async function getDiaryDetails(entry: DiaryItem): Promise<DiaryDetails> {
   const taken = new Date(entry.taken_at)
@@ -170,7 +193,10 @@ export async function markDiarySeen(id: string): Promise<void> {
 }
 
 export async function addDiaryComment(entryId: string, authorId: string, body: string): Promise<void> {
-  must(await supabase().from('diary_comments').insert({ entry_id: entryId, author_id: authorId, body }))
+  const row = must(
+    await supabase().from('diary_comments').insert({ entry_id: entryId, author_id: authorId, body }).select('id').single(),
+  ) as { id: string }
+  notify('diary_comment', row.id)
 }
 
 export async function paidSumSince(since: Date): Promise<number> {
@@ -289,6 +315,7 @@ export async function deleteMeal(id: string): Promise<void> {
 
 export async function setMenuPublished(menuId: string, published: boolean): Promise<void> {
   must(await supabase().from('menus').update({ published }).eq('id', menuId))
+  if (published) notify('menu_published', menuId)
 }
 
 /** Копіює страви з іншого тижня (наприклад, минулого), замінюючи наявні. */
@@ -353,13 +380,76 @@ export async function getCalendar(from: Date, to: Date): Promise<CalendarItem[]>
 
 export async function saveAppointment(draft: AppointmentDraft, id?: string): Promise<CalendarItem> {
   const table = supabase().from('appointments')
-  return must(
+  const saved = must(
     id
       ? await table.update(draft).eq('id', id).select(APPT_FIELDS).single()
       : await table.insert(draft).select(APPT_FIELDS).single(),
   ) as unknown as CalendarItem
+  notify('appointment', saved.id) // сервер сам розбереться: новий запис, перенесення чи нічого
+  return saved
 }
 
 export async function setAppointmentStatus(id: string, status: CalendarItem['status']): Promise<void> {
   must(await supabase().from('appointments').update({ status }).eq('id', id))
+  if (status === 'cancelled') notify('appointment', id)
+}
+
+// ---------------------------------------------------------------- оплати
+
+export type PaymentStatus = 'pending' | 'paid' | 'cancelled'
+
+export interface PaymentRow {
+  id: string
+  title: string
+  amount_uah: number
+  status: PaymentStatus
+  pay_url: string | null
+  created_at: string
+  paid_at: string | null
+  client: { id: string; full_name: string } | null
+}
+
+export interface PaymentDraft {
+  client_id: string
+  title: string
+  amount_uah: number
+  status: PaymentStatus
+  pay_url: string | null
+  paid_at: string | null
+}
+
+const PAYMENT_FIELDS = 'id, title, amount_uah, status, pay_url, created_at, paid_at, client:clients(id, full_name)'
+
+/** Оплати, створені або оплачені від `since`, найновіші першими. */
+export async function listPayments(since: Date): Promise<PaymentRow[]> {
+  const iso = since.toISOString()
+  return must(
+    await supabase()
+      .from('payments')
+      .select(PAYMENT_FIELDS)
+      .or(`created_at.gte.${iso},paid_at.gte.${iso},status.eq.pending`)
+      .order('created_at', { ascending: false }),
+  ) as unknown as PaymentRow[]
+}
+
+export async function savePayment(draft: PaymentDraft, id?: string): Promise<PaymentRow> {
+  const table = supabase().from('payments')
+  return must(
+    id
+      ? await table.update(draft).eq('id', id).select(PAYMENT_FIELDS).single()
+      : await table.insert(draft).select(PAYMENT_FIELDS).single(),
+  ) as unknown as PaymentRow
+}
+
+export async function setPaymentStatus(id: string, status: PaymentStatus): Promise<void> {
+  must(
+    await supabase()
+      .from('payments')
+      .update({ status, paid_at: status === 'paid' ? new Date().toISOString() : null })
+      .eq('id', id),
+  )
+}
+
+export async function deletePayment(id: string): Promise<void> {
+  must(await supabase().from('payments').delete().eq('id', id))
 }
