@@ -20,6 +20,7 @@ const api = vi.hoisted(() => ({
   setMealEaten: vi.fn<typeof Api.setMealEaten>(),
   setShoppingChecked: vi.fn<typeof Api.setShoppingChecked>(),
   setHabitDone: vi.fn<typeof Api.setHabitDone>(),
+  addDiaryEntry: vi.fn<typeof Api.addDiaryEntry>(),
 }))
 vi.mock('../api/client', () => api)
 vi.mock('../lib/supabase', () => ({ supabase: () => ({}) }))
@@ -46,7 +47,7 @@ describe('TodayView', () => {
     setActivePinia(createPinia())
     useAuth().account = { userId: 'u', telegramId: 1, role: 'client', firstName: 'Марія', clientId: 'c1' }
     vi.clearAllMocks()
-    api.getClientCard.mockResolvedValue({ id: 'c1', full_name: 'Марія Кравець', goal: null, program_title: 'Супровід', program_week: 3, program_weeks: 4 })
+    api.getClientCard.mockResolvedValue({ id: 'c1', full_name: 'Марія Кравець', goal: null, program_title: 'Супровід', program_week: 3, program_weeks: 4, on_support: false })
     api.getNextAppointment.mockResolvedValue(null)
     api.getWater.mockResolvedValue(3)
     api.getWellbeing.mockResolvedValue({ energy: 4, sleep: null, digestion: null, mood: null })
@@ -87,6 +88,57 @@ describe('TodayView', () => {
     await flushPromises()
     expect(btn.classes()).not.toContain('is-on')
     expect(w.find('[role="alert"]').exists()).toBe(true)
+  })
+
+  describe('клієнт на супроводі', () => {
+    beforeEach(() => {
+      api.getClientCard.mockResolvedValue({ id: 'c1', full_name: 'Марія Кравець', goal: null, program_title: 'Супровід', program_week: 3, program_weeks: 4, on_support: true })
+      api.addDiaryEntry.mockImplementation(async (_client, draft) => ({
+        id: 'e1',
+        ...draft,
+        menu_meal_id: draft.menu_meal_id ?? null,
+        photo_path: null,
+        seen_by_nutri: false,
+        comments: [],
+        photoUrl: null,
+      }))
+    })
+
+    it('«зʼїдено» не ставиться одразу — спершу просить фото або коментар', async () => {
+      const w = mountView()
+      await flushPromises()
+      await w.findAll('.today__eaten')[1]!.trigger('click')
+      expect(api.setMealEaten).not.toHaveBeenCalled()
+      expect(w.find('.report-modal').exists()).toBe(true)
+      // без фото й коментаря надіслати не можна
+      expect(w.find('.report-modal button[type="submit"]').attributes('disabled')).toBeDefined()
+      w.unmount()
+    })
+
+    it('з коментарем зберігає звіт у щоденник і відмічає страву', async () => {
+      const w = mountView()
+      await flushPromises()
+      await w.findAll('.today__eaten')[1]!.trigger('click')
+      await w.find('.report-modal textarea').setValue('Не встигла сфотографувати')
+      await w.find('form.report-modal__box').trigger('submit')
+      await flushPromises()
+      expect(api.addDiaryEntry).toHaveBeenCalledWith(
+        'c1',
+        expect.objectContaining({ meal: 'lunch', note: 'Запечена риба — Не встигла сфотографувати', menu_meal_id: 'm2' }),
+        null,
+      )
+      expect(api.setMealEaten).toHaveBeenCalledWith('c1', 'm2', true)
+      expect(w.find('.report-modal').exists()).toBe(false)
+      expect(w.findAll('.today__eaten')[1]!.classes()).toContain('is-on')
+    })
+
+    it('зняти відмітку можна без звіту', async () => {
+      const w = mountView()
+      await flushPromises()
+      await w.findAll('.today__eaten')[0]!.trigger('click')
+      expect(w.find('.report-modal').exists()).toBe(false)
+      expect(api.setMealEaten).toHaveBeenCalledWith('c1', 'm1', false)
+    })
   })
 
   it('каже, що меню ще готується, якщо його не опублікували', async () => {
