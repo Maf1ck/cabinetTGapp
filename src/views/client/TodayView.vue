@@ -284,7 +284,9 @@ main.page.today
       p.empty(v-else-if='!dayMeals.length') На цей день страв немає.
       .today__meals(v-else)
         article.today__meal(v-for='m in dayMeals' :key='m.id' :class='{ "today__meal--now": m.id === currentMealId }')
-          img.today__meal-photo(v-if='m.photoUrl' :src='m.photoUrl' :alt='m.title' loading='lazy')
+          .today__meal-pic(v-if='m.photoUrl')
+            img.today__meal-photo(:src='m.photoUrl' :alt='m.title' loading='lazy')
+            small.today__credit(v-if='m.photoCredit') Фото: {{ m.photoCredit }}
           .photo-ph.today__meal-photo(v-else aria-hidden='true')
             AppIcon(name='leaf' :size='26')
           .today__meal-body
@@ -498,6 +500,25 @@ main.page.today
     vertical-align: top;
     height: 110px;
     object-fit: cover;
+  }
+
+  &__meal-pic {
+    position: relative;
+  }
+
+  &__credit {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    max-width: 100%;
+    padding: 2px 8px;
+    border-top-right-radius: 8px;
+    background: rgba(20, 38, 27, 0.55);
+    color: #fff;
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   &__meal-body {

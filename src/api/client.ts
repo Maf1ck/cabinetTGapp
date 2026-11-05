@@ -40,6 +40,8 @@ export interface Meal {
   eaten: boolean
   /** фото страви з рецепта (якщо нутриціолог його додала) */
   photoUrl: string | null
+  /** підпис автора фото, якщо воно зі стороннього джерела */
+  photoCredit: string | null
 }
 
 export interface ShoppingItem {
@@ -134,17 +136,20 @@ export async function getWeekMenu(clientId: string, weekStart: string): Promise<
   const rows = must(
     await supabase()
       .from('menu_meals')
-      .select('id, day, meal, at_time, title, recipe_id, recipe:recipes(photo_path)')
+      .select('id, day, meal, at_time, title, recipe_id, recipe:recipes(photo_path, photo_credit)')
       .eq('menu_id', menu.id)
       .order('day')
       .order('meal'),
-  ) as unknown as (Omit<Meal, 'eaten' | 'photoUrl'> & { recipe: { photo_path: string | null } | null })[]
+  ) as unknown as (Omit<Meal, 'eaten' | 'photoUrl' | 'photoCredit'> & {
+    recipe: { photo_path: string | null; photo_credit: string | null } | null
+  })[]
   if (!rows.length) return []
 
   const photos = await recipePhotoUrls(rows.map((m) => m.recipe?.photo_path))
   const meals = rows.map(({ recipe, ...m }) => ({
     ...m,
     photoUrl: recipe?.photo_path ? (photos.get(recipe.photo_path) ?? null) : null,
+    photoCredit: recipe?.photo_path ? recipe.photo_credit : null,
   }))
 
   const checks = must(

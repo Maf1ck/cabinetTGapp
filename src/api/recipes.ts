@@ -35,6 +35,10 @@ export interface Recipe {
   aliases: string[]
   lines: RecipeLine[]
   photo_path: string | null
+  /** підпис для фото зі стороннього джерела: «автор · ліцензія»; власні фото — null */
+  photo_credit: string | null
+  /** сторінка оригіналу (для ліцензії) */
+  photo_source: string | null
   /** підписане посилання на фото (живе годину) */
   photoUrl: string | null
 }
@@ -65,7 +69,7 @@ export interface RecipeDraft {
 }
 
 const LINE_FIELDS = 'id, ingredient_id, name, amount, qty_from, qty_to, unit, note, position'
-const RECIPE_FIELDS = `id, title, category, servings, instructions, notes, source, aliases, photo_path, lines:recipe_ingredients(${LINE_FIELDS})`
+const RECIPE_FIELDS = `id, title, category, servings, instructions, notes, source, aliases, photo_path, photo_credit, photo_source, lines:recipe_ingredients(${LINE_FIELDS})`
 
 type SummaryRow = Omit<RecipeSummary, 'ingredients'> & { recipe_ingredients: { name: string }[] }
 
@@ -104,7 +108,11 @@ export async function setRecipePhoto(recipe: Pick<Recipe, 'id' | 'photo_path'>, 
   const path = `${recipe.id}/${crypto.randomUUID()}.${ext}`
   const { error } = await supabase().storage.from('recipes').upload(path, photo, { contentType: photo.type || 'image/jpeg' })
   if (error) throw error
-  const { error: dbError } = await supabase().from('recipes').update({ photo_path: path }).eq('id', recipe.id)
+  // власне фото — підпис стороннього автора більше не потрібен
+  const { error: dbError } = await supabase()
+    .from('recipes')
+    .update({ photo_path: path, photo_credit: null, photo_source: null })
+    .eq('id', recipe.id)
   if (dbError) {
     await supabase().storage.from('recipes').remove([path])
     throw dbError
@@ -114,7 +122,7 @@ export async function setRecipePhoto(recipe: Pick<Recipe, 'id' | 'photo_path'>, 
 }
 
 export async function removeRecipePhoto(recipe: Pick<Recipe, 'id' | 'photo_path'>): Promise<void> {
-  must(await supabase().from('recipes').update({ photo_path: null }).eq('id', recipe.id))
+  must(await supabase().from('recipes').update({ photo_path: null, photo_credit: null, photo_source: null }).eq('id', recipe.id))
   if (recipe.photo_path) await supabase().storage.from('recipes').remove([recipe.photo_path])
 }
 

@@ -265,7 +265,7 @@ async function dropPhoto() {
   photoError.value = ''
   try {
     await removeRecipePhoto(r)
-    recipe.value = { ...r, photo_path: null, photoUrl: null }
+    recipe.value = { ...r, photo_path: null, photo_credit: null, photo_source: null, photoUrl: null }
   } catch {
     photoError.value = 'Не вдалося прибрати фото.'
   } finally {
@@ -401,6 +401,7 @@ main.page.recipes
       template(v-else-if='recipe')
         .recipes__photo(v-if='recipe.photoUrl || canEdit' :class='{ "is-empty": !recipe.photoUrl }')
           img(v-if='recipe.photoUrl' :src='recipe.photoUrl' :alt='recipe.title')
+          a.recipes__credit(v-if='recipe.photoUrl && recipe.photo_credit' :href='recipe.photo_source || undefined' target='_blank' rel='noopener noreferrer') Фото: {{ recipe.photo_credit }}
           button.recipes__photo-add(v-else type='button' :disabled='photoBusy' @click='photoInput?.click()')
             AppIcon(name='camera' :size='26')
             span {{ photoBusy ? 'Завантажуємо…' : 'Додати фото страви' }}
@@ -496,6 +497,26 @@ main.page.recipes
     }
   }
 
+  &__credit {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    max-width: 60%;
+    padding: 3px 10px;
+    border-top-right-radius: 10px;
+    background: rgba(20, 38, 27, 0.55);
+    color: #fff;
+    font-size: 11px;
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
   &__photo-actions {
     position: absolute;
     right: 12px;
@@ -504,11 +525,15 @@ main.page.recipes
     gap: 6px;
   }
 
+  // Список (300px) і рецепт (520px) поруч вміщаються від 842px ширини області.
+  // Вужче — рецепт переноситься під список, тож поводимось як на телефоні
+  // (через container query: важить ширина області, а не вікна — є ж бокове меню).
   &__layout {
     display: flex;
     flex-wrap: wrap;
     align-items: flex-start;
     gap: 22px;
+    container-type: inline-size;
   }
 
   &__list {
@@ -521,11 +546,11 @@ main.page.recipes
     max-height: calc(100vh - 32px);
     padding: 12px;
 
-    @media (max-width: $bp-md) {
+    @container (max-width: 841px) {
       position: static;
       max-height: none;
 
-      // на телефоні список ховається, коли відкрито рецепт чи форму
+      // одна колонка: список ховається, коли відкрито рецепт чи форму
       &--hidden {
         display: none;
       }
@@ -638,7 +663,7 @@ main.page.recipes
     font-weight: 700;
     text-decoration: none;
 
-    @media (max-width: $bp-md) {
+    @container (max-width: 841px) {
       display: inline-flex;
     }
   }

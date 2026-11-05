@@ -34,6 +34,7 @@ const meal = (id: string, title: string, eaten = false): Api.Meal => ({
   recipe_id: null,
   eaten,
   photoUrl: null,
+  photoCredit: null,
 })
 
 function mountView() {

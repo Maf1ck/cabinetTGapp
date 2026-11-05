@@ -273,7 +273,7 @@ main.page.diary
             :aria-pressed='fromMenu?.id === m.id'
             @click='chooseFromMenu(m)'
           )
-            img(v-if='m.photoUrl' :src='m.photoUrl' alt='' loading='lazy')
+            img(v-if='m.photoUrl' :src='m.photoUrl' alt='' loading='lazy' :title='m.photoCredit ? `Фото: ${m.photoCredit}` : undefined')
             span.diary__menu-ph(v-else aria-hidden='true'): AppIcon(name='leaf' :size='18')
             span.diary__menu-text
               small {{ MEAL_LABEL[m.meal] }}{{ m.at_time ? ` · ${hhmm(m.at_time)}` : '' }}
