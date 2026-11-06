@@ -21,6 +21,8 @@ export interface ClientCard {
   program_title: string | null
   program_week: number | null
   program_weeks: number | null
+  /** на супроводі: «зʼїдено» — лише з фото страви або коментарем у щоденнику */
+  on_support: boolean
 }
 
 export interface Appointment {
@@ -75,7 +77,7 @@ export async function getClientCard(clientId: string): Promise<ClientCard> {
   return must(
     await supabase()
       .from('clients')
-      .select('id, full_name, goal, program_title, program_week, program_weeks')
+      .select('id, full_name, goal, program_title, program_week, program_weeks, on_support')
       .eq('id', clientId)
       .single(),
   )
@@ -340,6 +342,8 @@ export interface DiaryEntry {
   fullness: number | null
   mood: string | null
   seen_by_nutri: boolean
+  /** страва меню, про яку цей запис */
+  menu_meal_id: string | null
   comments: DiaryComment[]
   photoUrl: string | null
 }
@@ -351,10 +355,11 @@ export interface DiaryDraft {
   fullness: number | null
   mood: string | null
   taken_at: string
+  menu_meal_id?: string | null
 }
 
 const DIARY_FIELDS =
-  'id, meal, note, taken_at, photo_path, hunger, fullness, mood, seen_by_nutri, comments:diary_comments(id, body, created_at)'
+  'id, meal, note, taken_at, photo_path, hunger, fullness, mood, seen_by_nutri, menu_meal_id, comments:diary_comments(id, body, created_at)'
 
 /** Підписані посилання на фото з приватного бакета (живуть годину). */
 async function withPhotos(rows: Omit<DiaryEntry, 'photoUrl'>[]): Promise<DiaryEntry[]> {

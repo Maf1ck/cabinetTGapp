@@ -6,7 +6,8 @@ import { getRecipe, type Recipe } from '@/api/recipes'
 import type { Meal } from '@/api/client'
 import { hhmm, MEAL_LABEL } from '@/lib/meals'
 
-const props = defineProps<{ meal: Meal }>()
+// needsReport: клієнт на супроводі, «зʼїдено» ставиться лише зі звітом
+const props = defineProps<{ meal: Meal; needsReport?: boolean }>()
 const emit = defineEmits<{ close: []; toggle: [] }>()
 
 const recipe = ref<Recipe | null>(null)
@@ -14,6 +15,10 @@ const loading = ref(false)
 const loadError = ref(false)
 const closeBtn = ref<HTMLButtonElement | null>(null)
 
+const toggleLabel = computed(() => {
+  if (props.meal.eaten) return 'Зʼїдено. Зняти відмітку'
+  return props.needsReport ? 'Зʼїли? Надішліть фото чи коментар' : 'Відмітити зʼїденим'
+})
 const steps = computed(() => (recipe.value?.instructions ?? '').split(/\n+/).filter((p) => p.trim()))
 
 async function load() {
@@ -88,7 +93,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     .meal-dialog__foot
       button.btn(type='button' :class='meal.eaten ? "btn--ghost" : "btn--primary"' @click='emit("toggle")')
         AppIcon(v-if='meal.eaten' name='check' :size='16')
-        | {{ meal.eaten ? 'Зʼїдено. Зняти відмітку' : 'Відмітити зʼїденим' }}
+        | {{ toggleLabel }}
 </template>
 
 <style lang="scss">

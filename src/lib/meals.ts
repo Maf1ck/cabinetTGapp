@@ -74,3 +74,35 @@ export function dueMeals<T extends { meal: MealType; at_time: string | null }>(m
   const limit = day(date) < day(now) ? Infinity : now.getHours() * 60 + now.getMinutes() + DUE_EARLY_MIN
   return meals.filter((m) => mealMinutes(m) <= limit).sort((a, b) => mealMinutes(a) - mealMinutes(b))
 }
+
+// ---------------------------------------------------------------- звіт «зʼїдено» (клієнти на супроводі)
+
+/** Скільки символів коментаря до страви приймає форма звіту */
+export const REPORT_NOTE_MAX = 500
+
+/**
+ * Нотатка запису щоденника для страви з меню: назва страви і коментар клієнта.
+ * Без коментаря — лише назва (тоді звітом є фото).
+ */
+export const reportNote = (title: string, comment: string) => {
+  const c = comment.trim()
+  return c ? `${title} — ${c}` : title
+}
+
+/**
+ * Коли записати звіт: сьогоднішню або майбутню страву — зараз, минулу — на її час у меню
+ * (щоб запис потрапив у щоденник саме того дня).
+ */
+export function reportTime(
+  weekMonday: Date,
+  m: { day: number; meal: MealType; at_time: string | null },
+  now: Date,
+): Date {
+  const y = weekMonday.getFullYear()
+  const date = new Date(y, weekMonday.getMonth(), weekMonday.getDate() + m.day - 1)
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  if (date >= today) return now
+  const min = mealMinutes(m)
+  date.setHours(Math.floor(min / 60), min % 60)
+  return date
+}

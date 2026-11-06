@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useAuth } from '@/stores/auth'
 import AppIcon from '@/components/AppIcon.vue'
 import HintCard from '@/components/HintCard.vue'
+import MealReportModal from '@/components/MealReportModal.vue'
 import {
   getClientCard,
   getDiaryDays,
@@ -18,6 +19,7 @@ import {
   setWater,
   setWellbeing,
   type Appointment,
+  type DiaryEntry,
   type ClientCard,
   type Habit,
   type Meal,
@@ -82,7 +84,10 @@ const { parked, fresh, reset: resetShop, update: settleShop } = useSettle()
 const shoppingShown = computed(() => shopping.value.filter((i) => !parked.value.has(i.id)).slice(0, 6))
 const shoppingLeft = computed(() => shopping.value.filter((i) => !i.checked).length)
 const habits = ref<Habit[]>([])
-const diaryStreak = ref(0)
+const diaryDays = ref<string[]>([])
+const diaryStreak = computed(() => streak(diaryDays.value, now))
+/** страва, про яку клієнт на супроводі зараз надсилає фото чи коментар */
+const reporting = ref<Meal | null>(null)
 const selectedDay = ref(todayWd)
 
 const firstName = computed(() => auth.account?.firstName || card.value?.full_name.split(' ')[0] || '')
@@ -124,7 +129,7 @@ async function load() {
     shopping.value = s
     resetShop(s.filter((i) => i.checked).map((i) => i.id))
     habits.value = h
-    diaryStreak.value = streak(d, now)
+    diaryDays.value = d
   } catch {
     loadError.value = true
   } finally {
@@ -166,13 +171,22 @@ function rate(key: keyof Wellbeing, value: number) {
 }
 
 async function toggleMeal(meal: Meal) {
+  // на супроводі «зʼїдено» ставиться лише разом зі звітом (фото або коментар)
+  if (!meal.eaten && card.value?.on_support) {
+    reporting.value = meal
+    return
+  }
   const after = !meal.eaten
   await save(
     () => (meal.eaten = after),
     () => (meal.eaten = !after),
     () => setMealEaten(clientId, meal.id, after),
   )
-  // зʼїдене більше не треба купувати: список покупок на цій же сторінці
+  refreshShopping()
+}
+
+// зʼїдене більше не треба купувати: список покупок на цій же сторінці
+async function refreshShopping() {
   try {
     const items = await getShopping(clientId, week.start)
     shopping.value = items
@@ -180,6 +194,13 @@ async function toggleMeal(meal: Meal) {
   } catch {
     // список оновиться при наступному відкритті
   }
+}
+
+function onReported(entry: DiaryEntry) {
+  if (reporting.value) reporting.value.eaten = true
+  reporting.value = null
+  diaryDays.value = [...diaryDays.value, isoDate(new Date(entry.taken_at))]
+  refreshShopping()
 }
 
 function toggleItem(item: ShoppingItem) {
@@ -236,7 +257,8 @@ main.page.today
   template(v-else)
     HintCard(id='today' title='Як користуватися кабінетом')
       ul
-        li Зʼїли страву з меню — натисніть «Відмітити зʼїденим». Анастасія бачить ці відмітки.
+        li(v-if='card?.on_support') Зʼїли страву з меню — натисніть «Відмітити зʼїденим» і надішліть фото тарілки (або коментар, якщо сфотографувати не вийшло). Анастасія бачить кожен звіт.
+        li(v-else) Зʼїли страву з меню — натисніть «Відмітити зʼїденим». Анастасія бачить ці відмітки.
         li Сфотографуйте тарілку в #[RouterLink(to='/c/diary') Щоденнику] — там можна просто обрати страву з меню.
         li Додавайте склянки води й відмічайте самопочуття — це займає кілька секунд.
     .today__cards
@@ -335,6 +357,15 @@ main.page.today
             AppIcon(name='check' :size='14')
             | {{ h.doneDays.includes(today) ? 'Сьогодні виконано' : 'Відмітити за сьогодні' }}
         .tip #[b Порада дня:] {{ tip }}
+
+  MealReportModal(
+    v-if='reporting'
+    :client-id='clientId'
+    :meal='reporting'
+    :week-monday='monday'
+    @close='reporting = null'
+    @done='onReported'
+  )
 </template>
 
 <style lang="scss">
