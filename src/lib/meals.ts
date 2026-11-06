@@ -13,6 +13,27 @@ export const MEAL_LABEL: Record<MealType, string> = {
 /** '08:30:00' → '08:30' */
 export const hhmm = (t: string | null) => (t ? t.slice(0, 5) : '')
 
+interface MealContent {
+  id: string
+  day: number
+  meal: string
+  at_time: string | null
+  title: string
+  recipe_id: string | null
+}
+
+// час з бази приходить як 08:30:00, з форми як 08:30
+const mealKey = (m: MealContent) => [m.day, m.meal, hhmm(m.at_time), m.title, m.recipe_id].join('|')
+
+/** Страви чернетки, яких нема в збереженому меню або які в ньому інші. */
+export function changedMealIds(saved: MealContent[], next: MealContent[]): Set<string> {
+  const before = new Map(saved.map((m) => [m.id, mealKey(m)]))
+  return new Set(next.filter((m) => before.get(m.id) !== mealKey(m)).map((m) => m.id))
+}
+
+export const sameMeals = (saved: MealContent[], next: MealContent[]) =>
+  saved.length === next.length && changedMealIds(saved, next).size === 0
+
 /** Звичайний час прийому їжі: підставляється в нову страву чи запис */
 export const MEAL_TIME: Record<MealType, string> = {
   breakfast: '08:30',

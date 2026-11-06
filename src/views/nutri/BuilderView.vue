@@ -4,19 +4,19 @@ import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/AppIcon.vue'
 import HintCard from '@/components/HintCard.vue'
 import {
-  copyMenu,
-  deleteMeal,
+  discardMenuDraft,
   ensureMenu,
   getMenuForEdit,
+  hideMenu,
   listClients,
-  saveMeal,
-  setMenuPublished,
+  publishMenu,
+  saveMenuDraft,
   type ClientRow,
   type EditableMeal,
   type EditableMenu,
 } from '@/api/nutri'
 import { addDays, DAY_SHORT, isoDate, plural, shortDate, weekStart } from '@/lib/dates'
-import { hhmm, MEAL_LABEL, MEAL_TIME, MEALS, type MealType } from '@/lib/meals'
+import { changedMealIds, hhmm, MEAL_LABEL, MEAL_TIME, MEALS, sameMeals, type MealType } from '@/lib/meals'
 import { shortName } from '@/lib/clients'
 import { listRecipes, type RecipeSummary } from '@/api/recipes'
 import { normalize } from '@/lib/recipes'
@@ -62,6 +62,14 @@ const cell = (day: number, meal: MealType) => meals.value.find((m) => m.day === 
 const perDay = (day: number) => meals.value.filter((m) => m.day === day).length
 const eatenPerDay = (day: number) => meals.value.filter((m) => m.day === day && m.eaten).length
 const eatenTotal = computed(() => meals.value.filter((m) => m.eaten).length)
+const changed = computed(() => (menu.value?.hasDraft ? changedMealIds(menu.value.saved, meals.value) : new Set<string>()))
+const canSave = computed(
+  () => !menuLoading.value && !!menu.value && (menu.value.hasDraft || (!menu.value.published && meals.value.length > 0)),
+)
+const stateLabel = computed(() => {
+  if (!menu.value?.published) return 'Чернетка'
+  return menu.value.hasDraft ? 'Опубліковано · є чернетка' : 'Опубліковано'
+})
 const dayIso = (day: number) => isoDate(addDays(monday.value, day - 1))
 /** день настав (сьогодні чи раніше) — показуємо, скільки відмічено */
 const isPast = (day: number) => dayIso(day) <= isoDate(now)
@@ -196,26 +204,36 @@ function openEditor(day: number, meal: MealType) {
   nextTick(() => titleInput.value?.focus())
 }
 
+/** Усі правки йдуть у чернетку; повернули все як було — чернетка зникає. */
+async function writeDraft(next: EditableMeal[]) {
+  const target = menu.value ?? (await ensureMenu(clientId.value, weekIso.value))
+  const same = sameMeals(target.saved, next)
+  if (same) await discardMenuDraft(target.id)
+  else await saveMenuDraft(target.id, next)
+  menu.value = { ...target, meals: same ? target.saved : next, hasDraft: !same }
+}
+
 function saveEditor() {
   const e = editor.value
   if (!e) return
   const title = e.title.trim()
   if (!title) return removeFromEditor()
   run(async () => {
-    const target = menu.value ?? (await ensureMenu(clientId.value, weekIso.value))
-    const saved = await saveMeal(target.id, {
-      id: e.id,
-      day: e.day,
-      meal: e.meal,
-      at_time: e.time || null,
-      title,
-      recipe_id: e.recipeId,
-    })
-    const before = target.meals.find((m) => m.id === saved.id)
-    const rest = target.meals.filter((m) => m.id !== saved.id)
-    menu.value = { ...target, meals: [...rest, { ...saved, eaten: before?.eaten ?? false }] }
+    const before = meals.value.find((m) => m.id === e.id)
+    await writeDraft([
+      ...meals.value.filter((m) => m.id !== e.id),
+      {
+        id: e.id ?? crypto.randomUUID(),
+        day: e.day,
+        meal: e.meal,
+        at_time: e.time || null,
+        title,
+        recipe_id: e.recipeId,
+        eaten: before?.eaten ?? false,
+      },
+    ])
     editor.value = null
-  }, 'Не вдалося зберегти страву.')
+  }, 'Не вдалося зберегти чернетку.')
 }
 
 function removeFromEditor() {
@@ -226,32 +244,48 @@ function removeFromEditor() {
   }
   const id = e.id
   run(async () => {
-    await deleteMeal(id)
-    if (menu.value) menu.value = { ...menu.value, meals: menu.value.meals.filter((m) => m.id !== id) }
+    await writeDraft(meals.value.filter((m) => m.id !== id))
     editor.value = null
   }, 'Не вдалося видалити страву.')
 }
 
-function togglePublished() {
+function saveMenu() {
   const m = menu.value
   if (!m) return
-  const next = !m.published
-  if (next && !m.meals.length) {
+  if (!m.meals.length) {
     error.value = 'Додайте хоча б одну страву, перш ніж надсилати меню.'
     return
   }
   run(async () => {
-    await setMenuPublished(m.id, next)
-    menu.value = { ...m, published: next }
-  }, 'Не вдалося змінити публікацію.')
+    await publishMenu(m.id)
+    menu.value = await getMenuForEdit(clientId.value, weekIso.value)
+  }, 'Не вдалося зберегти меню. Чернетка лишилась, спробуйте ще раз.')
+}
+
+function discardDraft() {
+  const m = menu.value
+  if (!m || !window.confirm('Скасувати всі зміни чернетки? Меню повернеться до останньої збереженої версії.')) return
+  run(async () => {
+    await discardMenuDraft(m.id)
+    menu.value = { ...m, meals: m.saved, hasDraft: false }
+  }, 'Не вдалося скасувати зміни.')
+}
+
+function hideFromClient() {
+  const m = menu.value
+  if (!m) return
+  run(async () => {
+    await hideMenu(m.id)
+    menu.value = { ...m, published: false }
+  }, 'Не вдалося сховати меню.')
 }
 
 function copyPrevious() {
   if (meals.value.length && !window.confirm('Замінити страви цього тижня стравами з попереднього?')) return
   run(async () => {
-    const copied = await copyMenu(clientId.value, isoDate(addDays(monday.value, -7)), weekIso.value)
-    if (!copied) error.value = 'Минулого тижня меню для цього клієнта не було.'
-    else menu.value = copied
+    const source = await getMenuForEdit(clientId.value, isoDate(addDays(monday.value, -7)))
+    if (!source?.meals.length) error.value = 'Минулого тижня меню для цього клієнта не було.'
+    else await writeDraft(source.meals.map((m) => ({ ...m, id: crypto.randomUUID(), eaten: false })))
   }, 'Не вдалося скопіювати меню.')
 }
 
@@ -279,9 +313,8 @@ main.page.builder
       .page-head__sub Меню на тиждень для клієнта
       h1.page-head__title Конструктор меню
     .page-head__actions(v-if='menu')
-      span.builder__state(:class='{ "is-live": menu.published }') {{ menu.published ? 'Опубліковано' : 'Чернетка' }}
-      button.btn(type='button' :class='menu.published ? "btn--ghost" : "btn--primary"' :disabled='busy' @click='togglePublished')
-        | {{ menu.published ? 'Сховати від клієнта' : 'Надіслати клієнту' }}
+      span.builder__state(:class='{ "is-live": menu.published && !menu.hasDraft }') {{ stateLabel }}
+      button.btn.btn--ghost(v-if='menu.published' type='button' :disabled='busy' @click='hideFromClient') Сховати від клієнта
 
   p.empty(v-if='loading') Завантажуємо…
   .card(v-else-if='!activeClients.length')
@@ -313,11 +346,12 @@ main.page.builder
         li Обирайте страви з бази рецептів: клієнт побачить склад і приготування, а список покупок порахується сам.
         li Додайте фото до рецепта в #[RouterLink(to='/n/recipes') Базі рецептів] — воно зʼявиться в меню клієнта.
         li В опублікованому меню видно, що клієнт відмітив зʼїденим (зелена клітинка з ✓).
+        li Зміни зберігаються як чернетка, її можна закрити й повернутись пізніше. Клієнт побачить їх і отримає сповіщення лише після «Зберегти й надіслати». Змінені страви обведені.
 
     section.card
       p.empty(v-if='menuLoading') Завантажуємо меню…
       template(v-else)
-        p.builder__hint(v-if='!meals.length') Натисніть на клітинку, щоб додати страву. Меню побачить {{ client ? shortName(client.full_name) : 'клієнт' }} лише після «Надіслати клієнту».
+        p.builder__hint(v-if='!meals.length') Натисніть на клітинку, щоб додати страву. Меню побачить {{ client ? shortName(client.full_name) : 'клієнт' }} лише після «Зберегти й надіслати».
         .builder__legend(v-else-if='menu?.published')
           span #[i.builder__dot.is-eaten] зʼїдено — клієнт відмітив
           span #[i.builder__dot.is-missed] минулий день без відмітки
@@ -334,7 +368,7 @@ main.page.builder
                 v-for='d in weekDays'
                 :key='`${t}-${d.day}`'
                 type='button'
-                :class='{ "is-empty": !cell(d.day, t), "is-editing": editor?.day === d.day && editor?.meal === t, "is-eaten": cell(d.day, t)?.eaten, "is-missed": missed(d.day, t) }'
+                :class='{ "is-empty": !cell(d.day, t), "is-editing": editor?.day === d.day && editor?.meal === t, "is-eaten": cell(d.day, t)?.eaten, "is-missed": missed(d.day, t), "is-changed": changed.has(cell(d.day, t)?.id ?? "") }'
                 :aria-label='cellLabel(cell(d.day, t), d.day, t)'
                 @click='openEditor(d.day, t)'
               )
@@ -352,6 +386,15 @@ main.page.builder
             .builder__total(v-for='d in weekDays' :key='`sum-${d.day}`' :class='{ "is-warn": perDay(d.day) === 0 }')
               | {{ perDay(d.day) ? `${perDay(d.day)} ${plural(perDay(d.day), 'прийом', 'прийоми', 'прийомів')}` : 'Порожньо' }}
               small.builder__total-eaten(v-if='menu?.published && perDay(d.day) && isPast(d.day)') ✓ {{ eatenPerDay(d.day) }} з {{ perDay(d.day) }}
+
+    //- чернетка вже в базі: клієнт отримає її лише з цієї панелі
+    Transition(name='builder-bar')
+      .builder__bar(v-if='canSave' role='status')
+        span.builder__bar-text
+          b {{ menu?.hasDraft ? 'Чернетку збережено' : 'Меню ще не надіслане' }}
+          small {{ menu?.published ? 'Клієнт бачить попередню версію, доки ви не збережете зміни' : 'Клієнт побачить меню після збереження' }}
+        button.btn.btn--ghost.btn--sm(v-if='menu?.hasDraft' type='button' :disabled='busy' @click='discardDraft') Скасувати зміни
+        button.btn.btn--primary.btn--sm(type='button' :disabled='busy' @click='saveMenu') Зберегти й надіслати
 
   //- редактор страви
   Transition(name='builder-dialog')
@@ -396,10 +439,6 @@ main.page.builder
           label.field
             | Час
             input(v-model='editor.time' type='time')
-          .builder__dialog-actions
-            button.btn.btn--primary(type='submit' :disabled='busy') Зберегти
-            button.btn.btn--ghost(v-if='editor.id' type='button' :disabled='busy' @click='removeFromEditor') Видалити
-            button.btn.btn--ghost(v-else type='button' @click='editor = null') Скасувати
 
         //- база рецептів збоку
         aside.builder__book(v-if='recipes.length' aria-label='База рецептів')
@@ -431,6 +470,12 @@ main.page.builder
               small(v-if='searching || !listCategory') {{ r.category || 'Без категорії' }}
               AppIcon(v-if='r.id === editor.recipeId' name='check' :size='16')
             p.builder__hint.builder__hint--tight(v-if='!recipeList.length') Нічого не знайдено — страву можна вписати вручну.
+
+        //- поза прокруткою: на телефоні кнопку видно, навіть коли гортаєш рецепти
+        .builder__dialog-actions
+          button.btn.btn--primary(type='submit' :disabled='busy') {{ editor.id ? 'Готово' : 'Додати' }}
+          button.btn.btn--ghost(v-if='editor.id' type='button' :disabled='busy' @click='removeFromEditor') Видалити
+          button.btn.btn--ghost(v-else type='button' @click='editor = null') Скасувати
 </template>
 
 <style lang="scss">
@@ -628,13 +673,15 @@ main.page.builder
     display: flex;
     flex-direction: column;
     gap: 10px;
+    grid-column: 2;
+    grid-row: 1 / 3;
     min-height: 0;
     padding: 22px;
     border-left: 1px solid $line;
     background: $bg-soft;
 
     @media (max-width: $bp-md) {
-      padding-bottom: calc(22px + env(safe-area-inset-bottom));
+      flex: none;
       border-top: 1px solid $line;
       border-left: 0;
     }
@@ -875,6 +922,7 @@ main.page.builder
     &--wide {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+      grid-template-rows: minmax(0, 1fr) auto;
       max-width: 920px;
       height: min(620px, calc(100vh - 32px));
 
@@ -893,6 +941,7 @@ main.page.builder
     overflow-y: auto;
 
     @media (max-width: $bp-md) {
+      flex: none;
       overflow: visible;
     }
   }
@@ -908,6 +957,77 @@ main.page.builder
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+    padding: 14px 22px;
+    border-top: 1px solid $line;
+    background: $bg;
+
+    @media (max-width: $bp-md) {
+      position: sticky;
+      bottom: 0;
+      padding-bottom: calc(14px + env(safe-area-inset-bottom));
+    }
+  }
+
+  // панель чернетки: прилипає до низу, поки меню на екрані
+  &__bar-text {
+    display: flex;
+    flex: 1 1 220px;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  &__cell.is-changed {
+    border-color: $accent;
+  }
+
+  &__bar {
+    position: sticky;
+    bottom: 12px;
+    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin-top: 12px;
+    padding: 10px 12px 10px 16px;
+    border: 1px solid $line-green;
+    border-radius: $radius-card;
+    background: $bg;
+    box-shadow: 0 8px 24px rgba(20, 38, 27, 0.14);
+
+    @media (max-width: $bp-sidebar) {
+      bottom: calc(64px + env(safe-area-inset-bottom) + 10px);
+    }
+
+    b {
+      color: $text;
+      font-size: 14px;
+    }
+
+    small {
+      color: $text-muted;
+      font-size: 12px;
+    }
+  }
+}
+
+.builder-bar-enter-active,
+.builder-bar-leave-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.builder-bar-enter-from,
+.builder-bar-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .builder-bar-enter-active,
+  .builder-bar-leave-active {
+    transition: none;
   }
 }
 

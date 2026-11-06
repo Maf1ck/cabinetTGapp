@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useAuth } from '@/stores/auth'
 import AppIcon from '@/components/AppIcon.vue'
+import MealDialog from '@/components/MealDialog.vue'
 import { getWeekMenu, setMealEaten, type Meal } from '@/api/client'
 import { addDays, DAY_SHORT, isoDate, shortDate, weekday, weekStart } from '@/lib/dates'
 import { hhmm, MEAL_LABEL, MEALS } from '@/lib/meals'
@@ -18,6 +19,7 @@ const loading = ref(true)
 const loadError = ref(false)
 const saveError = ref(false)
 const meals = ref<Meal[] | null>(null)
+const opened = ref<Meal | null>(null)
 
 const isThisWeek = computed(() => isoDate(monday.value) === isoDate(thisMonday))
 const weekDays = computed(() =>
@@ -52,8 +54,7 @@ const shiftWeek = (delta: number) => setWeek(addDays(monday.value, delta * 7))
 const goThisWeek = () => setWeek(thisMonday)
 
 // Шаблон pug у dev іде як чистий JS — без `!`/`as`, тому приймаємо й undefined
-const cellTitle = (m: Meal | undefined) =>
-  m?.eaten ? 'Зʼїдено — натисніть, щоб зняти відмітку' : 'Натисніть, щоб відмітити зʼїденим'
+const open = (meal: Meal | undefined) => (opened.value = meal ?? null)
 
 async function toggle(meal: Meal | undefined) {
   if (!meal) return
@@ -110,15 +111,13 @@ main.page.menu
                 button.menu__cell(
                   type='button'
                   :class='{ "menu__cell--today": d.today, "is-eaten": cell(d.day, t)?.eaten }'
-                  :aria-pressed='!!cell(d.day, t)?.eaten'
-                  :title='cellTitle(cell(d.day, t))'
-                  @click='toggle(cell(d.day, t))'
+                  @click='open(cell(d.day, t))'
                 )
                   span {{ cell(d.day, t)?.title }}
                   AppIcon(v-if='cell(d.day, t)?.eaten' name='check' :size='16')
-                RouterLink.menu__recipe(v-if='cell(d.day, t)?.recipe_id' :to='`/c/recipes/${cell(d.day, t)?.recipe_id}`')
-                  AppIcon(name='book' :size='14')
-                  | Рецепт
+                button.menu__mark(type='button' :class='{ "is-on": cell(d.day, t)?.eaten }' :aria-pressed='!!cell(d.day, t)?.eaten' @click='toggle(cell(d.day, t))')
+                  AppIcon(name='check' :size='14')
+                  | {{ cell(d.day, t)?.eaten ? 'Зʼїдено' : 'Відмітити' }}
               .menu__cell.menu__cell--empty(v-else) —
 
       //- телефон: день за днем
@@ -137,16 +136,15 @@ main.page.menu
             b {{ d.date.getDate() }}
         p.empty(v-if='!dayMeals.length') На цей день страв немає.
         .menu__slot(v-for='m in dayMeals' :key='m.id')
-          button.menu__item(type='button' :class='{ "is-eaten": m.eaten }' :aria-pressed='m.eaten' @click='toggle(m)')
+          button.menu__item(type='button' :class='{ "is-eaten": m.eaten }' @click='open(m)')
             img.menu__thumb(v-if='m.photoUrl' :src='m.photoUrl' alt='' loading='lazy' :title='m.photoCredit ? `Фото: ${m.photoCredit}` : undefined')
             span.menu__item-text
               span.menu__item-type {{ MEAL_LABEL[m.meal] }}{{ m.at_time ? ` · ${hhmm(m.at_time)}` : '' }}
               b {{ m.title }}
-            span.menu__tick
-              AppIcon(name='check' :size='16')
-          RouterLink.menu__recipe(v-if='m.recipe_id' :to='`/c/recipes/${m.recipe_id}`')
-            AppIcon(name='book' :size='14')
-            | Рецепт: {{ m.title }}
+            AppIcon(name='chevronRight' :size='18')
+          button.menu__mark(type='button' :class='{ "is-on": m.eaten }' :aria-pressed='m.eaten' @click='toggle(m)')
+            AppIcon(name='check' :size='14')
+            | {{ m.eaten ? 'Зʼїдено' : 'Відмітити зʼїденим' }}
 
   .menu__row
     section.card.menu__plate
@@ -159,8 +157,10 @@ main.page.menu
           li #[i.is-carb] ¼ крупи, хліб, картопля
     section.card.menu__help
       h2.card__title Як користуватися
-      p.menu__help-text Натисніть на страву, щоб відмітити її з'їденою, — Анастасія бачить, як вам вдається триматися плану.
+      p.menu__help-text Натисніть на страву, щоб побачити рецепт. Зʼїли — натисніть «Відмітити»: Анастасія побачить, як вам вдається триматися плану, а продукти для цієї страви зникнуть зі списку покупок.
       RouterLink.btn.btn--soft(to='/c/chat') Попросити замінити страву
+
+  MealDialog(v-if='opened' :meal='opened' @close='opened = null' @toggle='toggle(opened)')
 </template>
 
 <style lang="scss">
@@ -271,19 +271,26 @@ main.page.menu
     }
   }
 
-  &__recipe {
+  &__mark {
     display: inline-flex;
     align-items: center;
     align-self: flex-start;
     gap: 4px;
-    padding: 2px 4px;
-    color: $green-link;
+    padding: 4px 4px;
+    border: 0;
+    background: none;
+    color: $text-muted;
+    font: inherit;
     font-size: 13px;
     font-weight: 700;
-    text-decoration: none;
+    cursor: pointer;
 
     &:hover {
-      text-decoration: underline;
+      color: $green-link;
+    }
+
+    &.is-on {
+      color: $text-active;
     }
   }
 
@@ -373,23 +380,6 @@ main.page.menu
     text-transform: uppercase;
   }
 
-  &__tick {
-    display: flex;
-    flex: none;
-    align-items: center;
-    justify-content: center;
-    width: 30px;
-    height: 30px;
-    border: 2px solid $line-input;
-    border-radius: 50%;
-    color: transparent;
-
-    .is-eaten & {
-      border-color: $accent;
-      background: $accent;
-      color: #fff;
-    }
-  }
 
   &__row {
     display: flex;

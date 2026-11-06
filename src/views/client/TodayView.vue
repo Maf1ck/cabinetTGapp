@@ -165,13 +165,21 @@ function rate(key: keyof Wellbeing, value: number) {
   )
 }
 
-function toggleMeal(meal: Meal) {
+async function toggleMeal(meal: Meal) {
   const after = !meal.eaten
-  save(
+  await save(
     () => (meal.eaten = after),
     () => (meal.eaten = !after),
     () => setMealEaten(clientId, meal.id, after),
   )
+  // зʼїдене більше не треба купувати: список покупок на цій же сторінці
+  try {
+    const items = await getShopping(clientId, week.start)
+    shopping.value = items
+    resetShop(items.filter((i) => i.checked).map((i) => i.id))
+  } catch {
+    // список оновиться при наступному відкритті
+  }
 }
 
 function toggleItem(item: ShoppingItem) {

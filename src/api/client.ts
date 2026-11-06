@@ -184,15 +184,19 @@ type RecipeRow = {
   lines: { name: string; qty_from: number | null; qty_to: number | null; unit: string | null; ingredient: { category: string | null } | null }[]
 }
 
-/** Що треба купити за опублікованим меню; null — меню на тиждень ще немає. */
+/** meal_checks — один-до-одного, тож PostgREST віддає обʼєкт або null (а інколи масив). */
+export const hasCheck = (checks: unknown) => (Array.isArray(checks) ? checks.length > 0 : !!checks)
+
+/** Що ще треба купити за опублікованим меню, без уже зʼїдених страв; null — меню на тиждень ще немає. */
 async function linesFromMenu(clientId: string, weekStart: string): Promise<{ lines: ShopLine[]; withoutRecipe: string[] } | null> {
   const menu = must(
     await supabase().from('menus').select('id').eq('client_id', clientId).eq('week_start', weekStart).maybeSingle(),
   ) as { id: string } | null
   if (!menu) return null
-  const meals = must(
-    await supabase().from('menu_meals').select('title, recipe_id').eq('menu_id', menu.id),
-  ) as { title: string; recipe_id: string | null }[]
+  const rows = must(
+    await supabase().from('menu_meals').select('title, recipe_id, meal_checks(meal_id)').eq('menu_id', menu.id),
+  ) as { title: string; recipe_id: string | null; meal_checks: unknown }[]
+  const meals = rows.filter((m) => !hasCheck(m.meal_checks))
   const ids = meals.flatMap((m) => (m.recipe_id ? [m.recipe_id] : []))
   const recipes = new Map<string, ShopRecipe>()
   if (ids.length) {
@@ -217,7 +221,8 @@ async function linesFromMenu(clientId: string, weekStart: string): Promise<{ lin
 
 /**
  * Список покупок на тиждень. Рядки «з меню» звіряються з поточним меню: нові додаються,
- * зайві прибираються, кількості оновлюються; відмітки «куплено» і свої пункти клієнта лишаються.
+ * зайві (зокрема для вже зʼїдених страв) прибираються, кількості оновлюються;
+ * відмітки «куплено» і свої пункти клієнта лишаються.
  */
 export async function getShoppingList(clientId: string, weekStart: string): Promise<ShoppingList> {
   const table = () => supabase().from('shopping_items')

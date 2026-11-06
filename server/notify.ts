@@ -55,6 +55,12 @@ export const texts = {
     return `🌿 <b>Ваше меню готове</b>\nТиждень ${dayShort.format(from)} — ${dayShort.format(to)}. Рецепти — одним дотиком у кабінеті.`
   },
 
+  menuUpdated(weekStart: string) {
+    const from = new Date(`${weekStart}T12:00:00Z`)
+    const to = new Date(from.getTime() + 6 * 86_400_000)
+    return `🌿 <b>Анастасія оновила ваше меню</b>\nТиждень ${dayShort.format(from)} — ${dayShort.format(to)}. Подивіться зміни в кабінеті.`
+  },
+
   comment(meal: string | null, body: string) {
     const about = meal && MEAL[meal] ? `${meal === 'dinner' ? 'вашу' : 'ваш'} ${MEAL[meal]}` : 'ваш запис у щоденнику'
     return `💬 <b>Анастасія прокоментувала ${about}</b>\n«${quote(body)}»`

@@ -144,6 +144,41 @@ check('Клієнт не бачить login_tokens', await count(MARIA, 'select 
 check('Клієнт не бачить notifications', await count(MARIA, 'select * from notifications'), 0)
 check('Клієнт не бачить notification_log', await count(MARIA, 'select * from notification_log'), 0)
 
+// Чернетка меню
+const E1 = '00000000-0000-0000-0000-0000000000e1'
+const M1 = '00000000-0000-0000-0000-0000000000f1'
+const M2 = '00000000-0000-0000-0000-0000000000f2'
+await db.exec(`
+  insert into menu_meals (id, menu_id, day, meal, title) values
+    ('${M1}', '${E1}', 2, 'lunch', 'Суп'),
+    ('${M2}', '${E1}', 3, 'lunch', 'Прибрати');
+  insert into meal_checks (meal_id, client_id) values ('${M1}', '${C1}');
+`)
+const draft = JSON.stringify([
+  { id: M1, day: 2, meal: 'lunch', at_time: '13:00', title: 'Суп новий', recipe_id: null },
+  { id: '00000000-0000-0000-0000-0000000000f3', day: 4, meal: 'dinner', at_time: null, title: 'Нова', recipe_id: '00000000-0000-0000-0000-00000000dead' },
+])
+const putDraft = await as(NUTRI, `insert into menu_drafts (menu_id, meals) values ('${E1}', '${draft}'::jsonb) returning 1`)
+check('Анастасія зберігає чернетку', Array.isArray(putDraft), true)
+check('Клієнт не бачить чернетку', await count(MARIA, 'select * from menu_drafts'), 0)
+const stealDraft = await as(MARIA, `insert into menu_drafts (menu_id, meals) values ('00000000-0000-0000-0000-0000000000e2', '[]') returning 1`)
+check('Клієнт не пише чернетку', typeof stealDraft === 'string', true)
+check('До збереження клієнт бачить стару страву', await count(MARIA, `select * from menu_meals where title = 'Прибрати'`), 1)
+const hack = await as(MARIA, `select publish_menu('${E1}')`)
+check('Клієнт не публікує чернетку', typeof hack === 'string', true)
+check('Чернетка лишилась після спроби клієнта', (await db.query(`select 1 from menu_drafts where menu_id='${E1}'`)).rows.length, 1)
+const pub = await as(NUTRI, `select publish_menu('${E1}')`)
+check('Анастасія публікує чернетку', Array.isArray(pub), true)
+check('Прибрану страву клієнт більше не бачить', await count(MARIA, `select * from menu_meals where title = 'Прибрати'`), 0)
+check('Зміна дійшла до клієнта', await count(MARIA, `select * from menu_meals where title = 'Суп новий'`), 1)
+check('Відмітка «зʼїдено» лишилась на зміненій страві', await count(MARIA, `select * from meal_checks where meal_id='${M1}'`), 1)
+check('Страва з видаленим рецептом лишається без посилання', await count(MARIA, `select * from menu_meals where title = 'Нова' and recipe_id is null`), 1)
+check('Після збереження чернетки немає', (await db.query(`select 1 from menu_drafts`)).rows.length, 0)
+const rev = async () => (await db.query(`select revision from menus where id='${E1}'`)).rows[0].revision
+const first = await rev()
+await as(NUTRI, `select publish_menu('${E1}')`)
+check('Повтор без змін не створює нової версії', await rev(), first)
+
 // Сховище
 check('Марія бачить лише свої файли', await count(MARIA, `select * from storage.objects where bucket_id='diary'`), 1)
 check('Нутриціолог бачить усі файли', await count(NUTRI, `select * from storage.objects where bucket_id='diary'`), 2)

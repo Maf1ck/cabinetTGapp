@@ -48,11 +48,13 @@ export async function POST(req: Request): Promise<Response> {
   let result: SendResult | 'skipped' = 'skipped'
 
   if (event === 'menu_published') {
-    const { data: m } = await sb.from('menus').select('id, client_id, week_start, published').eq('id', id).maybeSingle()
+    const { data: m } = await sb.from('menus').select('id, client_id, week_start, published, revision').eq('id', id).maybeSingle()
     const to = m?.published ? await clientChat(sb, m.client_id) : null
+    // перша версія — «меню готове», кожна наступна — окреме «оновила»
+    const updated = (m?.revision ?? 1) > 1
     if (m && to)
-      result = await sendOnce(sb, `menu:${m.id}`, to.chatId, {
-        text: texts.menuPublished(m.week_start),
+      result = await sendOnce(sb, updated ? `menu:${m.id}:${m.revision}` : `menu:${m.id}`, to.chatId, {
+        text: updated ? texts.menuUpdated(m.week_start) : texts.menuPublished(m.week_start),
         path: '/c/menu',
         label: 'Відкрити меню',
       })

@@ -2,7 +2,7 @@
 import { supabase } from '@/lib/supabase'
 import { isoDate, weekday, weekStart } from '@/lib/dates'
 import type { MealType } from '@/lib/meals'
-import { must, type Wellbeing } from './client'
+import { hasCheck, must, type Wellbeing } from './client'
 import { notify } from './notify'
 
 export interface ClientRow {
@@ -255,7 +255,11 @@ export interface EditableMeal {
 export interface EditableMenu {
   id: string
   published: boolean
+  /** робоча версія: чернетка, а якщо її немає, то збережене меню */
   meals: EditableMeal[]
+  /** те, що зараз бачить клієнт (або побачив би, якщо меню ще не надіслане) */
+  saved: EditableMeal[]
+  hasDraft: boolean
 }
 
 const MEAL_FIELDS = 'id, day, meal, at_time, title, recipe_id'
@@ -278,13 +282,18 @@ export async function getMenuForEdit(clientId: string, weekStart: string): Promi
       .eq('menu_id', menu.id)
       .order('day')
       .order('meal'),
-  ) as (Omit<EditableMeal, 'eaten'> & { meal_checks: unknown[] | unknown | null })[]
-  // meal_checks — один-до-одного, тож PostgREST віддає обʼєкт або null (а інколи масив)
-  const meals = rows.map(({ meal_checks, ...m }) => ({
-    ...m,
-    eaten: Array.isArray(meal_checks) ? meal_checks.length > 0 : !!meal_checks,
-  }))
-  return { ...menu, meals }
+  ) as (Omit<EditableMeal, 'eaten'> & { meal_checks: unknown })[]
+  const saved = rows.map(({ meal_checks, ...m }) => ({ ...m, eaten: hasCheck(meal_checks) }))
+  const draft = must(
+    await supabase().from('menu_drafts').select('meals').eq('menu_id', menu.id).maybeSingle(),
+  ) as { meals: Omit<EditableMeal, 'eaten'>[] } | null
+  const eaten = new Set(saved.filter((m) => m.eaten).map((m) => m.id))
+  return {
+    ...menu,
+    saved,
+    meals: draft ? draft.meals.map((m) => ({ ...m, eaten: eaten.has(m.id) })) : saved,
+    hasDraft: !!draft,
+  }
 }
 
 /** Меню створюється при першій страві; нове — завжди чернетка. */
@@ -298,60 +307,31 @@ export async function ensureMenu(clientId: string, weekStart: string): Promise<E
       .select('id, published')
       .single(),
   ) as { id: string; published: boolean }
-  return { ...row, meals: [] }
+  return { ...row, meals: [], saved: [], hasDraft: false }
 }
 
-export async function saveMeal(
-  menuId: string,
-  meal: Omit<EditableMeal, 'id' | 'eaten'> & { id?: string },
-): Promise<Omit<EditableMeal, 'eaten'>> {
-  const row = {
-    menu_id: menuId,
-    day: meal.day,
-    meal: meal.meal,
-    at_time: meal.at_time,
-    title: meal.title,
-    recipe_id: meal.recipe_id,
-  }
-  const table = supabase().from('menu_meals')
-  return must(
-    meal.id
-      ? await table.update(row).eq('id', meal.id).select(MEAL_FIELDS).single()
-      : await table.insert(row).select(MEAL_FIELDS).single(),
+/** Чернетка лежить у базі: її видно з будь-якого пристрою, клієнту вона недоступна. */
+export async function saveMenuDraft(menuId: string, meals: EditableMeal[]): Promise<void> {
+  const clean = meals.map(({ eaten: _eaten, ...m }) => m)
+  must(
+    await supabase()
+      .from('menu_drafts')
+      .upsert({ menu_id: menuId, meals: clean, updated_at: new Date().toISOString() }),
   )
 }
 
-export async function deleteMeal(id: string): Promise<void> {
-  must(await supabase().from('menu_meals').delete().eq('id', id))
+export async function discardMenuDraft(menuId: string): Promise<void> {
+  must(await supabase().from('menu_drafts').delete().eq('menu_id', menuId))
 }
 
-export async function setMenuPublished(menuId: string, published: boolean): Promise<void> {
-  must(await supabase().from('menus').update({ published }).eq('id', menuId))
-  if (published) notify('menu_published', menuId)
+/** Застосовує чернетку, показує меню клієнту і надсилає сповіщення. */
+export async function publishMenu(menuId: string): Promise<void> {
+  must(await supabase().rpc('publish_menu', { p_menu_id: menuId }))
+  notify('menu_published', menuId)
 }
 
-/** Копіює страви з іншого тижня (наприклад, минулого), замінюючи наявні. */
-export async function copyMenu(clientId: string, fromWeek: string, toWeek: string): Promise<EditableMenu | null> {
-  const source = await getMenuForEdit(clientId, fromWeek)
-  if (!source?.meals.length) return null
-  const target = await ensureMenu(clientId, toWeek)
-  must(await supabase().from('menu_meals').delete().eq('menu_id', target.id))
-  const meals = must(
-    await supabase()
-      .from('menu_meals')
-      .insert(
-        source.meals.map(({ day, meal, at_time, title, recipe_id }) => ({
-          menu_id: target.id,
-          day,
-          meal,
-          at_time,
-          title,
-          recipe_id,
-        })),
-      )
-      .select(MEAL_FIELDS),
-  ) as Omit<EditableMeal, 'eaten'>[]
-  return { ...target, meals: meals.map((m) => ({ ...m, eaten: false })) }
+export async function hideMenu(menuId: string): Promise<void> {
+  must(await supabase().from('menus').update({ published: false }).eq('id', menuId))
 }
 
 // ---------------------------------------------------------------- календар
