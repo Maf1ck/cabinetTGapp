@@ -130,12 +130,19 @@ export const texts = {
 let api: Api | undefined
 const bot = () => (api ??= new Api(env('TELEGRAM_BOT_TOKEN')))
 
-// Кнопка Mini App лише з https; локально (http://localhost) — без кнопки
-function button(path: string | undefined, label: string): InlineKeyboard | undefined {
-  if (!path) return undefined
+export const SITE_LABEL = '🌐 Відкрити на сайті'
+
+/**
+ * Кнопки під повідомленням: Mini App, якщо є куди вести, і завжди той самий кабінет на сайті.
+ * Лише з https: локально (http://localhost) Telegram їх не прийме, тому кнопок немає.
+ */
+export function cabinetButtons(path: string | undefined, label: string): InlineKeyboard | undefined {
   try {
     const url = appUrl()
-    return url.startsWith('https://') ? new InlineKeyboard().webApp(label, `${url}${path}`) : undefined
+    if (!url.startsWith('https://')) return undefined
+    const keyboard = new InlineKeyboard()
+    if (path !== undefined) keyboard.webApp(label, `${url}${path}`).row()
+    return keyboard.url(SITE_LABEL, `${url}${path ?? ''}`)
   } catch {
     return undefined
   }
@@ -150,7 +157,7 @@ export interface Message {
 }
 
 export async function sendTo(chatId: number, m: Message): Promise<void> {
-  const reply_markup = button(m.path, m.label ?? 'Відкрити кабінет')
+  const reply_markup = cabinetButtons(m.path, m.label ?? 'Відкрити кабінет')
   if (m.photoUrl) {
     try {
       await bot().sendPhoto(chatId, m.photoUrl, { caption: m.text, parse_mode: 'HTML', reply_markup })
@@ -187,6 +194,16 @@ export async function sendOnce(sb: SupabaseClient, key: string, chatId: number, 
     console.error(`notify ${key}:`, (e as Error).message)
     return 'failed'
   }
+}
+
+/**
+ * Те саме сповіщення кожному нутриціологу: ключ журналу окремий на кожного,
+ * тож збій або зупинений бот в одного не блокує іншого.
+ */
+export async function sendOnceToAll(sb: SupabaseClient, key: string, chatIds: number[], m: Message): Promise<SendResult> {
+  const results = await Promise.all(chatIds.map((id) => sendOnce(sb, `${key}:${id}`, id, m)))
+  if (results.includes('sent')) return 'sent'
+  return results.includes('failed') ? 'failed' : 'duplicate'
 }
 
 /** Telegram id клієнта; null — ще не приєднався або доступ вимкнено. */

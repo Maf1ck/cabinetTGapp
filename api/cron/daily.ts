@@ -1,10 +1,10 @@
 // Щоранку (vercel.json → crons, 06:00 UTC ≈ 8:00 за Києвом взимку):
-// нагадування клієнтам про сьогоднішні консультації і ранковий підсумок для Анастасії.
+// нагадування клієнтам про сьогоднішні консультації і ранковий підсумок для нутриціологів.
 // Vercel сам додає заголовок Authorization: Bearer $CRON_SECRET.
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { db } from '../../server/accounts.js'
-import { env, ownerTgId } from '../../server/env.js'
-import { clientChat, firstName, kyivDate, sendOnce, texts } from '../../server/notify.js'
+import { env, ownerTgIds } from '../../server/env.js'
+import { clientChat, firstName, kyivDate, sendOnce, sendOnceToAll, texts } from '../../server/notify.js'
 
 const SILENT_DAYS = 3
 
@@ -49,7 +49,7 @@ export async function GET(req: Request): Promise<Response> {
     if (r === 'sent') reminders++
   }
 
-  // Підсумок для Анастасії
+  // Підсумок для нутриціологів
   const { count: unseen } = await sb
     .from('diary_entries')
     .select('id', { count: 'exact', head: true })
@@ -69,7 +69,7 @@ export async function GET(req: Request): Promise<Response> {
     return days === null || days >= SILENT_DAYS ? [{ name: firstName(c.full_name), days }] : []
   })
 
-  const digest = await sendOnce(sb, `digest:${today}`, ownerTgId(), {
+  const digest = await sendOnceToAll(sb, `digest:${today}`, ownerTgIds(), {
     text: texts.digest({
       appointments: todays.map((a) => ({ starts_at: a.starts_at, kind: a.kind, client: a.client?.full_name ?? 'Клієнт' })),
       unseen: unseen ?? 0,

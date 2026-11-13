@@ -6,7 +6,18 @@ export function env(name: string): string {
   return value
 }
 
-export const ownerTgId = () => Number(env('OWNER_TG_ID'))
+/** Telegram ID нутриціологів: `OWNER_TG_ID=111,222` (один ID теж підходить). */
+export function parseOwnerIds(raw: string): number[] {
+  const ids = raw
+    .split(/[,\s;]+/)
+    .filter(Boolean)
+    .map(Number)
+  if (!ids.length || ids.some((id) => !Number.isSafeInteger(id) || id <= 0))
+    throw new Error('OWNER_TG_ID: вкажіть Telegram ID нутриціологів числами через кому')
+  return [...new Set(ids)]
+}
+
+export const ownerTgIds = () => parseOwnerIds(env('OWNER_TG_ID'))
 
 export const botUsername = () => env('VITE_BOT_USERNAME').replace(/^@/, '')
 

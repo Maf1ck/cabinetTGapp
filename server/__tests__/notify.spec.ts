@@ -1,5 +1,28 @@
-import { describe, expect, it } from 'vitest'
-import { escapeHtml, firstName, kyivDate, texts } from '../notify'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cabinetButtons, escapeHtml, firstName, kyivDate, SITE_LABEL, texts } from '../notify'
+
+describe('кнопки під повідомленням', () => {
+  const flat = (path: string | undefined) => cabinetButtons(path, 'Меню')?.inline_keyboard.flat()
+
+  beforeEach(() => vi.stubEnv('APP_URL', 'https://cabinet.test/'))
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('веде і в Mini App, і на сайт на ту саму сторінку', () => {
+    expect(flat('/c/menu')).toEqual([
+      { text: 'Меню', web_app: { url: 'https://cabinet.test/c/menu' } },
+      { text: SITE_LABEL, url: 'https://cabinet.test/c/menu' },
+    ])
+  })
+
+  it('без сторінки лишається кнопка сайту', () => {
+    expect(flat(undefined)).toEqual([{ text: SITE_LABEL, url: 'https://cabinet.test' }])
+  })
+
+  it('локально кнопок немає', () => {
+    vi.stubEnv('APP_URL', 'http://localhost:5173')
+    expect(cabinetButtons('/c', 'Меню')).toBeUndefined()
+  })
+})
 
 describe('сповіщення', () => {
   it('рахує дату за Києвом, а не за UTC сервера', () => {

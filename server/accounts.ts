@@ -64,21 +64,21 @@ async function insertUser(sb: SupabaseClient, tg: TgUser, role: AppRole) {
 }
 
 /**
- * Доступ мають лише Анастасія (OWNER_TG_ID, роль nutri призначається автоматично)
+ * Доступ мають лише нутриціологи (OWNER_TG_ID, роль nutri призначається автоматично)
  * і клієнти, які прийняли запрошення і чия картка активна. Реєстрації немає.
  */
 export async function resolveAccount(
   sb: SupabaseClient,
   tg: TgUser,
-  ownerId: number,
+  ownerIds: number[],
 ): Promise<Account | null> {
-  // Нутриціолог лише один: той, чий ID зараз в OWNER_TG_ID. Якщо його змінили (тести),
-  // попередній власник втрачає права одразу: RLS дивиться на users.role, а не на сесію.
+  // Нутриціологи лише ті, чиї ID зараз в OWNER_TG_ID. Якщо когось прибрали зі списку,
+  // він втрачає права одразу: RLS дивиться на users.role, а не на сесію.
   const { error: de } = await sb
     .from('users')
     .update({ role: 'client' })
     .eq('role', 'nutri')
-    .neq('telegram_id', ownerId)
+    .not('telegram_id', 'in', `(${ownerIds.join(',')})`)
   if (de) throw de
 
   const { data: found, error } = await sb
@@ -88,7 +88,7 @@ export async function resolveAccount(
     .maybeSingle()
   if (error) throw error
 
-  if (tg.id === ownerId) {
+  if (ownerIds.includes(tg.id)) {
     const user = found ?? (await insertUser(sb, tg, 'nutri'))
     const { error: ue } = await sb
       .from('users')
@@ -149,14 +149,14 @@ export async function sessionResponse(sb: SupabaseClient, account: Account): Pro
 export async function accountFromToken(
   sb: SupabaseClient,
   token: string,
-  ownerId: number,
+  ownerIds: number[],
 ): Promise<Account | null> {
   if (!token) return null
   const { data, error } = await sb.auth.getUser(token)
   if (error || !data.user) return null
   const { data: user } = await sb.from('users').select('telegram_id').eq('id', data.user.id).maybeSingle()
   if (!user) return null
-  return resolveAccount(sb, { id: Number(user.telegram_id) }, ownerId)
+  return resolveAccount(sb, { id: Number(user.telegram_id) }, ownerIds)
 }
 
 // ---------------------------------------------------------------- вхід з браузера
@@ -176,9 +176,9 @@ export async function confirmLogin(
   sb: SupabaseClient,
   tg: TgUser,
   token: string,
-  ownerId: number,
+  ownerIds: number[],
 ): Promise<'ok' | 'denied' | 'expired'> {
-  if (!(await resolveAccount(sb, tg, ownerId))) return 'denied'
+  if (!(await resolveAccount(sb, tg, ownerIds))) return 'denied'
   const { data, error } = await sb
     .from('login_tokens')
     .update({ telegram_id: tg.id })
@@ -195,7 +195,7 @@ export async function confirmLogin(
 export async function claimLogin(
   sb: SupabaseClient,
   token: string,
-  ownerId: number,
+  ownerIds: number[],
 ): Promise<Account | 'pending' | 'expired' | 'denied'> {
   const { data, error } = await sb
     .from('login_tokens')
@@ -208,7 +208,7 @@ export async function claimLogin(
   if (error) throw error
 
   const claimed = data[0]
-  if (claimed) return (await resolveAccount(sb, { id: Number(claimed.telegram_id) }, ownerId)) ?? 'denied'
+  if (claimed) return (await resolveAccount(sb, { id: Number(claimed.telegram_id) }, ownerIds)) ?? 'denied'
 
   const { data: row } = await sb
     .from('login_tokens')
@@ -238,9 +238,9 @@ export async function acceptInvite(
   sb: SupabaseClient,
   tg: TgUser,
   code: string,
-  ownerId: number,
+  ownerIds: number[],
 ): Promise<InviteResult> {
-  if (tg.id === ownerId) return { ok: false, reason: 'owner' }
+  if (ownerIds.includes(tg.id)) return { ok: false, reason: 'owner' }
 
   const { data: invite } = await sb
     .from('invites')

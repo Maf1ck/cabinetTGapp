@@ -1,11 +1,11 @@
 // Анастасія створює запрошення для картки клієнта: POST { clientId } → посилання для клієнта.
 import { accountFromToken, createInvite, db, INVITE_TTL_DAYS } from '../server/accounts.js'
-import { botUsername, ownerTgId } from '../server/env.js'
+import { botUsername, ownerTgIds } from '../server/env.js'
 import { bearer, readBody } from '../server/http.js'
 
 export async function POST(req: Request): Promise<Response> {
   const sb = db()
-  const me = await accountFromToken(sb, bearer(req), ownerTgId())
+  const me = await accountFromToken(sb, bearer(req), ownerTgIds())
   if (!me) return Response.json({ error: 'unauthorized' }, { status: 401 })
   if (me.role !== 'nutri') return Response.json({ error: 'forbidden' }, { status: 403 })
 

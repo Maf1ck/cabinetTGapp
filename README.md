@@ -23,7 +23,7 @@ pnpm lint
 ### 1. Telegram-бот
 1. У @BotFather: `/newbot` → отримати **токен** і **username** бота.
 2. `/setdomain` не потрібен: вхід з браузера йде через бота (deep-link), не через Login Widget.
-3. Telegram ID Анастасії: написати @userinfobot → число це `OWNER_TG_ID`.
+3. Telegram ID нутриціологів: кожен пише @userinfobot → числа через кому це `OWNER_TG_ID` (напр. `111,222`).
 
 ### 2. Supabase
 1. Створити проєкт на supabase.com (регіон ближче до України, напр. Frankfurt).
@@ -32,7 +32,7 @@ pnpm lint
    **API Keys**: anon/publishable і service_role/secret.
 4. Authentication → Sign In / Providers → **вимкнути «Allow new users to sign up»**:
    акаунти створює лише наш сервер.
-5. Роль `nutri` Анастасія отримує автоматично при першому вході (за `OWNER_TG_ID`).
+5. Роль `nutri` нутриціологи отримують автоматично при першому вході (за `OWNER_TG_ID`).
 
 ### 3. Змінні середовища
 Скопіювати `.env.example` в `.env` (локально) і додати ті самі змінні у Vercel → Settings → Environment Variables.
@@ -75,7 +75,7 @@ pnpm bot:dev   # бот локально, long polling
   (`tg<id>@telegram.invalid`, без пароля, пошта не надсилається), `users.id = auth.users.id`.
   Сервер бере сесію сам (`generateLink` → `verifyOtp`) лише після перевірки Telegram.
 - RLS пропускає клієнта лише до його рядків і лише поки картка `active`, нутриціолога до всіх.
-- Нутриціолог лише той, чий ID зараз в `OWNER_TG_ID`: при зміні попередній одразу стає клієнтом.
+- Нутриціологи лише ті, чиї ID зараз в `OWNER_TG_ID` (можна кілька, усі бачать усіх клієнтів): хто випав зі списку, одразу стає клієнтом. Сповіщення для нутриціолога (щоденник, аналізи, дайджест) йдуть кожному.
 - `login_tokens`, `invites`, `notifications` без політик: доступні лише серверу (service role).
 - Фото й аналізи в приватних бакетах, шлях `<client_id>/<файл>`.
 

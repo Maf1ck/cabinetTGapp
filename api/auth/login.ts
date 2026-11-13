@@ -2,7 +2,7 @@
 //   POST → одноразовий токен і посилання t.me/<bot>?start=login_<token>
 //   GET ?token=… → сайт опитує, доки користувач не підтвердить вхід у боті
 import { claimLogin, createLoginToken, db, sessionResponse } from '../../server/accounts.js'
-import { botUsername, ownerTgId } from '../../server/env.js'
+import { botUsername, ownerTgIds } from '../../server/env.js'
 
 export async function POST(): Promise<Response> {
   const token = await createLoginToken(db())
@@ -14,7 +14,7 @@ export async function GET(req: Request): Promise<Response> {
   if (!/^[\w-]{8,58}$/.test(token)) return Response.json({ error: 'bad_token' }, { status: 400 })
 
   const sb = db()
-  const result = await claimLogin(sb, token, ownerTgId())
+  const result = await claimLogin(sb, token, ownerTgIds())
   if (result === 'pending') return Response.json({ status: 'pending' }, { status: 202 })
   if (result === 'expired') return Response.json({ error: 'expired' }, { status: 410 })
   if (result === 'denied') return Response.json({ error: 'no_access' }, { status: 403 })

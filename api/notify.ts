@@ -1,9 +1,9 @@
 // Кабінет повідомляє про подію: POST { event, id }. Сервер перевіряє, що подія справжня
 // і належить тому, хто питає, — і надсилає сповіщення в Telegram (кожне лише раз).
 import { accountFromToken, db } from '../server/accounts.js'
-import { ownerTgId } from '../server/env.js'
+import { ownerTgIds } from '../server/env.js'
 import { bearer, readBody } from '../server/http.js'
-import { clientChat, sendOnce, texts, type SendResult } from '../server/notify.js'
+import { clientChat, sendOnce, sendOnceToAll, texts, type SendResult } from '../server/notify.js'
 
 const EVENTS = ['menu_published', 'diary_comment', 'diary_entry', 'appointment', 'lab_file'] as const
 type Event = (typeof EVENTS)[number]
@@ -33,8 +33,8 @@ interface EntryRow {
 
 export async function POST(req: Request): Promise<Response> {
   const sb = db()
-  const owner = ownerTgId()
-  const me = await accountFromToken(sb, bearer(req), owner)
+  const owners = ownerTgIds()
+  const me = await accountFromToken(sb, bearer(req), owners)
   if (!me) return Response.json({ error: 'unauthorized' }, { status: 401 })
 
   const { event, id } = await readBody(req)
@@ -110,7 +110,7 @@ export async function POST(req: Request): Promise<Response> {
       .eq('id', id)
       .maybeSingle()
     const entry = data as EntryRow | null
-    // не більше ENTRY_BURST сповіщень на годину від одного клієнта — решту видно в кабінеті
+    // не більше ENTRY_BURST сповіщень на годину від одного клієнта (у журналі по рядку на кожного нутриціолога) — решту видно в кабінеті
     const { count: recent } = entry
       ? await sb
           .from('notification_log')
@@ -118,11 +118,11 @@ export async function POST(req: Request): Promise<Response> {
           .like('key', `entry:${entry.client_id}:%`)
           .gte('sent_at', new Date(Date.now() - 3600e3).toISOString())
       : { count: 0 }
-    if (entry && entry.client_id === me.clientId && (recent ?? 0) < ENTRY_BURST) {
+    if (entry && entry.client_id === me.clientId && (recent ?? 0) < ENTRY_BURST * owners.length) {
       const photo = entry.photo_path
         ? (await sb.storage.from('diary').createSignedUrl(entry.photo_path, 600)).data?.signedUrl
         : null
-      result = await sendOnce(sb, `entry:${entry.client_id}:${entry.id}`, owner, {
+      result = await sendOnceToAll(sb, `entry:${entry.client_id}:${entry.id}`, owners, {
         text: texts.diaryEntry(entry.client?.full_name ?? 'Клієнт', entry),
         photoUrl: photo,
         path: '/n',
@@ -139,7 +139,7 @@ export async function POST(req: Request): Promise<Response> {
       .maybeSingle()
     const lab = data as { id: string; client_id: string; title: string; client: { full_name: string } | null } | null
     if (lab && lab.client_id === me.clientId)
-      result = await sendOnce(sb, `lab:${lab.id}`, owner, {
+      result = await sendOnceToAll(sb, `lab:${lab.id}`, owners, {
         text: texts.labFile(lab.client?.full_name ?? 'Клієнт', lab.title),
         path: `/n/clients/${lab.client_id}`,
         label: 'Картка клієнта',
