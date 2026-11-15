@@ -1,7 +1,7 @@
 // Дані кабінету клієнта. Доступ обмежує RLS: клієнт бачить і пише лише рядки свого client_id.
 import { supabase } from '@/lib/supabase'
 import { isoDate } from '@/lib/dates'
-import type { MealType } from '@/lib/meals'
+import { productsOf, type MealProduct, type MealType } from '@/lib/meals'
 import { notify } from './notify'
 import { normalize } from '@/lib/recipes'
 import { buildShoppingList, type ShopLine, type ShopRecipe } from '@/lib/shopping'
@@ -39,6 +39,8 @@ export interface Meal {
   at_time: string | null
   title: string
   recipe_id: string | null
+  /** продукти з грамовкою поруч зі стравою або замість неї */
+  products: MealProduct[]
   eaten: boolean
   /** фото страви з рецепта (якщо нутриціолог його додала) */
   photoUrl: string | null
@@ -138,7 +140,7 @@ export async function getWeekMenu(clientId: string, weekStart: string): Promise<
   const rows = must(
     await supabase()
       .from('menu_meals')
-      .select('id, day, meal, at_time, title, recipe_id, recipe:recipes(photo_path, photo_credit)')
+      .select('id, day, meal, at_time, title, recipe_id, products, recipe:recipes(photo_path, photo_credit)')
       .eq('menu_id', menu.id)
       .order('day')
       .order('meal'),
@@ -150,6 +152,7 @@ export async function getWeekMenu(clientId: string, weekStart: string): Promise<
   const photos = await recipePhotoUrls(rows.map((m) => m.recipe?.photo_path))
   const meals = rows.map(({ recipe, ...m }) => ({
     ...m,
+    products: productsOf(m),
     photoUrl: recipe?.photo_path ? (photos.get(recipe.photo_path) ?? null) : null,
     photoCredit: recipe?.photo_path ? recipe.photo_credit : null,
   }))
@@ -196,10 +199,12 @@ async function linesFromMenu(clientId: string, weekStart: string): Promise<{ lin
   ) as { id: string } | null
   if (!menu) return null
   const rows = must(
-    await supabase().from('menu_meals').select('title, recipe_id, meal_checks(meal_id)').eq('menu_id', menu.id),
-  ) as { title: string; recipe_id: string | null; meal_checks: unknown }[]
+    await supabase().from('menu_meals').select('title, recipe_id, products, meal_checks(meal_id)').eq('menu_id', menu.id),
+  ) as { title: string; recipe_id: string | null; products: MealProduct[] | null; meal_checks: unknown }[]
   const meals = rows.filter((m) => !hasCheck(m.meal_checks))
-  const ids = meals.flatMap((m) => (m.recipe_id ? [m.recipe_id] : []))
+  // продукти прийому їжі — це вже повний склад порції (з рецепта, з грамовкою нутриціолога),
+  // тож рецепт рахуємо лише там, де продуктів немає (меню, складені раніше)
+  const ids = meals.flatMap((m) => (m.recipe_id && !productsOf(m).length ? [m.recipe_id] : []))
   const recipes = new Map<string, ShopRecipe>()
   if (ids.length) {
     const rows = must(
@@ -216,8 +221,15 @@ async function linesFromMenu(clientId: string, weekStart: string): Promise<{ lin
       })
   }
   return {
-    lines: buildShoppingList(ids, recipes),
-    withoutRecipe: [...new Set(meals.filter((m) => !m.recipe_id).map((m) => m.title))],
+    lines: buildShoppingList(
+      ids,
+      recipes,
+      meals.flatMap((m) =>
+        productsOf(m).map((p) => ({ name: p.name, qty_from: p.qty, qty_to: null, unit: p.unit, category: p.category })),
+      ),
+    ),
+    // продукти вже в списку, тож «без рецепта» — лише страви, де немає ні рецепта, ні продуктів
+    withoutRecipe: [...new Set(meals.filter((m) => !m.recipe_id && !productsOf(m).length).map((m) => m.title))],
   }
 }
 

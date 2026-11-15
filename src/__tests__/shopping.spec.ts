@@ -46,6 +46,22 @@ describe('список покупок', () => {
     ])
   })
 
+  it('додає продукти з грамовкою з меню й сумує з рецептами', () => {
+    const list = buildShoppingList(['omelet'], recipes, [
+      { name: 'Гречка', qty_from: 60, qty_to: null, unit: 'г', category: 'Крупи та хлібобулочні' },
+      { name: 'гречка', qty_from: 50, qty_to: null, unit: 'г', category: 'Крупи та хлібобулочні' },
+      { name: 'Помідор', qty_from: 100, qty_to: null, unit: 'г', category: 'Овочі' },
+      { name: 'Зелень', qty_from: null, qty_to: null, unit: null, category: 'Зелень' },
+    ])
+    expect(list).toEqual([
+      { name: 'Помідор', amount: '150–160 г', category: 'Овочі' },
+      { name: 'Зелень', amount: null, category: 'Зелень' },
+      { name: 'Яйця', amount: '2 шт', category: 'Яйця' },
+      { name: 'Гречка', amount: '110 г', category: 'Крупи та хлібобулочні' },
+      { name: 'Сіль', amount: null, category: 'Спеції та приправи' },
+    ])
+  })
+
   it('пропускає невідомі рецепти', () => {
     expect(buildShoppingList(['nope'], recipes)).toEqual([])
   })

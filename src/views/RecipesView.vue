@@ -4,6 +4,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '@/stores/auth'
 import AppIcon from '@/components/AppIcon.vue'
+import SuggestInput, { type Suggestion } from '@/components/SuggestInput.vue'
 import {
   deleteRecipe,
   getRecipe,
@@ -146,6 +147,11 @@ function cancelForm() {
 
 const addLine = () => draft.value.lines.push(emptyLine())
 const removeLine = (i: number) => draft.value.lines.splice(i, 1)
+
+const categoryOptions = computed<Suggestion[]>(() => categories.value.map((c) => ({ value: c.name, hint: String(c.count) })))
+const ingredientOptions = computed<Suggestion[]>(() =>
+  catalog.value.map((i) => ({ value: i.name, hint: i.category, keys: i.aliases })),
+)
 
 // обрали інгредієнт із довідника — підставляємо його звичну одиницю
 function pickIngredient(line: RecipeLineDraft) {
@@ -347,12 +353,10 @@ main.page.recipes
         .recipes__grid
           label.field
             | Категорія
-            input(v-model='draft.category' type='text' list='recipe-categories' placeholder='Основна страва')
+            SuggestInput(v-model='draft.category' :options='categoryOptions' open-on-focus placeholder='Основна страва')
           label.field
             | Порцій
             input(v-model='draft.servings' type='text' maxlength='20' placeholder='2')
-        datalist#recipe-categories
-          option(v-for='c in categories' :key='c.name' :value='c.name')
 
         fieldset.recipes__lines
           legend Інгредієнти
@@ -362,7 +366,14 @@ main.page.recipes
             span Од.
             span Примітка
           .recipes__line(v-for='(l, i) in draft.lines' :key='i')
-            input(v-model='l.name' type='text' list='recipe-ingredients' :aria-label='`Інгредієнт ${i + 1}`' placeholder='Куряче філе' @change='pickIngredient(l)')
+            SuggestInput(
+              v-model='l.name'
+              :options='ingredientOptions'
+              :aria-label='`Інгредієнт ${i + 1}`'
+              placeholder='Куряче філе'
+              @change='pickIngredient(l)'
+              @pick='pickIngredient(l)'
+            )
             .recipes__qty
               input(v-model.number='l.qty_from' type='number' min='0' step='any' inputmode='decimal' :aria-label='`Кількість ${i + 1}`' placeholder='200')
               span –
@@ -373,8 +384,6 @@ main.page.recipes
             input(v-model='l.note' type='text' :aria-label='`Примітка ${i + 1}`' placeholder='за смаком, натерти…')
             button.btn.btn--ghost.btn--sm.recipes__remove(type='button' :aria-label='`Прибрати інгредієнт ${i + 1}`' @click='removeLine(i)')
               AppIcon(name='close' :size='16')
-          datalist#recipe-ingredients
-            option(v-for='ing in catalog' :key='ing.id' :value='ing.name')
           button.btn.btn--soft.btn--sm(type='button' @click='addLine')
             AppIcon(name='plus' :size='16')
             | Інгредієнт
@@ -784,7 +793,8 @@ main.page.recipes
 
   &__grid {
     display: grid;
-    grid-template-columns: 2fr 1fr;
+    // minmax(0, …): ширину ділять колонки, а не природна ширина полів
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
     gap: 12px;
   }
 

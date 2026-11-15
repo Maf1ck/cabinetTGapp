@@ -193,6 +193,19 @@
   }
 }
 
+// продукти з грамовкою під назвою страви: «Гречка — 60 г · Огірок — 150 г»
+// склад порції під назвою страви; повний — у вікні страви
+.products-line {
+  display: -webkit-box;
+  overflow: hidden;
+  color: $text-muted;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .empty {
   padding: 18px;
   border-radius: $radius-item;

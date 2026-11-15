@@ -13,6 +13,45 @@ export const MEAL_LABEL: Record<MealType, string> = {
 /** '08:30:00' → '08:30' */
 export const hhmm = (t: string | null) => (t ? t.slice(0, 5) : '')
 
+// ---------------------------------------------------------------- продукти з грамовкою
+
+/** Продукт у прийомі їжі поруч зі стравою або замість неї: «Гречка 60 г». */
+export interface MealProduct {
+  /** з довідника інгредієнтів; null — вписано вручну */
+  ingredient_id: string | null
+  name: string
+  /** null — без кількості («за смаком») */
+  qty: number | null
+  unit: string | null
+  /** відділ магазину для списку покупок */
+  category: string | null
+}
+
+export const PRODUCTS_MAX = 30
+
+/** «Гречка — 60 г»; без кількості — лише назва */
+export const productLabel = (p: Pick<MealProduct, 'name' | 'qty' | 'unit'>) =>
+  p.qty === null ? p.name : `${p.name} — ${p.qty}${p.unit ? ` ${p.unit}` : ''}`
+
+/** Назва прийому їжі, коли страви немає, а є лише продукти: «Гречка, Огірок, Олія оливкова» */
+export const titleFromProducts = (products: Pick<MealProduct, 'name'>[]) =>
+  products
+    .map((p) => p.name.trim())
+    .filter(Boolean)
+    .join(', ')
+    .slice(0, 120)
+
+/** Чернетки й рядки, збережені до появи продуктів, їх не мають */
+export const productsOf = (m: { products?: MealProduct[] | null }): MealProduct[] => m.products ?? []
+
+type WithProducts = { title: string; products?: MealProduct[] | null }
+
+/** У страви своя назва (а не складена з продуктів, коли страви немає) */
+export const hasOwnTitle = (m: WithProducts) => m.title !== titleFromProducts(productsOf(m))
+
+/** «Гречка — 60 г · Огірок — 150 г» */
+export const productsLine = (m: WithProducts) => productsOf(m).map(productLabel).join(' · ')
+
 interface MealContent {
   id: string
   day: number
@@ -20,10 +59,14 @@ interface MealContent {
   at_time: string | null
   title: string
   recipe_id: string | null
+  products?: MealProduct[] | null
 }
 
+const productsKey = (m: MealContent) => productsOf(m).map((p) => `${p.ingredient_id ?? ''}:${p.name}:${p.qty ?? ''}:${p.unit ?? ''}`)
+
 // час з бази приходить як 08:30:00, з форми як 08:30
-const mealKey = (m: MealContent) => [m.day, m.meal, hhmm(m.at_time), m.title, m.recipe_id].join('|')
+const mealKey = (m: MealContent) =>
+  [m.day, m.meal, hhmm(m.at_time), m.title, m.recipe_id, ...productsKey(m)].join('|')
 
 /** Страви чернетки, яких нема в збереженому меню або які в ньому інші. */
 export function changedMealIds(saved: MealContent[], next: MealContent[]): Set<string> {

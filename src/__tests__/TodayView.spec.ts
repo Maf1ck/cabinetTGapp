@@ -33,6 +33,7 @@ const meal = (id: string, title: string, eaten = false): Api.Meal => ({
   at_time: '14:00:00',
   title,
   recipe_id: null,
+  products: [],
   eaten,
   photoUrl: null,
   photoCredit: null,

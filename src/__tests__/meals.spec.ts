@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { changedMealIds, dueMeals, reportNote, reportTime, sameMeals, type MealType } from '@/lib/meals'
+import {
+  changedMealIds,
+  dueMeals,
+  hasOwnTitle,
+  productLabel,
+  productsLine,
+  reportNote,
+  reportTime,
+  sameMeals,
+  titleFromProducts,
+  type MealProduct,
+  type MealType,
+} from '@/lib/meals'
 
 const m = (meal: MealType, at_time: string | null = null) => ({ meal, at_time, title: meal })
 const menu = [m('dinner'), m('breakfast', '08:00:00'), m('lunch', '13:30:00'), m('snack1')]
@@ -38,6 +50,41 @@ describe('чернетка меню', () => {
 
   it('видалену страву теж вважає зміною', () => {
     expect(sameMeals([soup], [])).toBe(false)
+  })
+
+  it('зміну грамовки чи продукту вважає зміною; старі страви без продуктів = порожній список', () => {
+    const buckwheat: MealProduct = { ingredient_id: 'g', name: 'Гречка', qty: 60, unit: 'г', category: null }
+    const withProducts = { ...soup, products: [buckwheat] }
+    expect(sameMeals([soup], [{ ...soup, products: [] }])).toBe(true)
+    expect(sameMeals([withProducts], [{ ...soup, products: [{ ...buckwheat }] }])).toBe(true)
+    expect(sameMeals([withProducts], [{ ...soup, products: [{ ...buckwheat, qty: 80 }] }])).toBe(false)
+    expect(sameMeals([soup], [withProducts])).toBe(false)
+  })
+})
+
+describe('продукти з грамовкою', () => {
+  const p = (name: string, qty: number | null, unit: string | null = 'г'): MealProduct => ({
+    ingredient_id: null,
+    name,
+    qty,
+    unit,
+    category: null,
+  })
+
+  it('підпис: назва — кількість одиниця; без кількості — лише назва', () => {
+    expect(productLabel(p('Гречка', 60))).toBe('Гречка — 60 г')
+    expect(productLabel(p('Олія оливкова', 5, 'мл'))).toBe('Олія оливкова — 5 мл')
+    expect(productLabel(p('Яблуко', 1, null))).toBe('Яблуко — 1')
+    expect(productLabel(p('Зелень', null))).toBe('Зелень')
+  })
+
+  it('без страви назва складається з продуктів, і тоді своєї назви немає', () => {
+    const products = [p('Гречка', 60), p('Огірок', 150)]
+    expect(titleFromProducts(products)).toBe('Гречка, Огірок')
+    expect(hasOwnTitle({ title: 'Гречка, Огірок', products })).toBe(false)
+    expect(hasOwnTitle({ title: 'Курка з овочами', products })).toBe(true)
+    expect(productsLine({ title: 'x', products })).toBe('Гречка — 60 г · Огірок — 150 г')
+    expect(productsLine({ title: 'x' })).toBe('')
   })
 })
 

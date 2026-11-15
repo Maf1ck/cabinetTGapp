@@ -38,7 +38,7 @@ import {
   weekday,
   weekStart,
 } from '@/lib/dates'
-import { hhmm, MEAL_LABEL } from '@/lib/meals'
+import { hasOwnTitle, hhmm, MEAL_LABEL, productsLine } from '@/lib/meals'
 import { useSettle } from '@/lib/settle'
 
 const GLASS_ML = 250
@@ -321,7 +321,8 @@ main.page.today
             AppIcon(name='leaf' :size='26')
           .today__meal-body
             .today__meal-type {{ MEAL_LABEL[m.meal] }}{{ m.at_time ? ` · ${hhmm(m.at_time)}` : '' }}{{ m.id === currentMealId ? ' · зараз' : '' }}
-            b {{ m.title }}
+            b {{ hasOwnTitle(m) ? m.title : productsLine(m) }}
+            span.products-line(v-if='hasOwnTitle(m) && m.products.length') {{ productsLine(m) }}
             RouterLink.today__recipe(v-if='m.recipe_id' :to='`/c/recipes/${m.recipe_id}`')
               AppIcon(name='book' :size='14')
               | Як приготувати

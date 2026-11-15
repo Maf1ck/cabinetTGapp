@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { getRecipe, type Recipe } from '@/api/recipes'
 import type { Meal } from '@/api/client'
-import { hhmm, MEAL_LABEL } from '@/lib/meals'
+import { hhmm, MEAL_LABEL, type MealProduct } from '@/lib/meals'
 
 // needsReport: клієнт на супроводі, «зʼїдено» ставиться лише зі звітом
 const props = defineProps<{ meal: Meal; needsReport?: boolean }>()
@@ -19,6 +19,10 @@ const toggleLabel = computed(() => {
   if (props.meal.eaten) return 'Зʼїдено. Зняти відмітку'
   return props.needsReport ? 'Зʼїли? Надішліть фото чи коментар' : 'Відмітити зʼїденим'
 })
+/** «60 г»; без кількості — порожньо */
+const amountOf = (p: MealProduct) => (p.qty === null ? '' : p.unit ? `${p.qty} ${p.unit}` : String(p.qty))
+/** нутриціолог розписала склад порції з грамовкою */
+const portion = computed(() => props.meal.products.length > 0)
 const steps = computed(() => (recipe.value?.instructions ?? '').split(/\n+/).filter((p) => p.trim()))
 
 async function load() {
@@ -62,9 +66,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         div
           .eyebrow {{ MEAL_LABEL[meal.meal] }}{{ meal.at_time ? ` · ${hhmm(meal.at_time)}` : '' }}
           h2.meal-dialog__title {{ meal.title }}
-          .meal-dialog__tags(v-if='recipe && (recipe.category || recipe.servings)')
+          .meal-dialog__tags(v-if='recipe && (recipe.category || (recipe.servings && !portion))')
             span.chip(v-if='recipe.category') {{ recipe.category }}
-            span.chip.chip--plain(v-if='recipe.servings') Порцій: {{ recipe.servings }}
+            span.chip.chip--plain(v-if='recipe.servings && !portion') Порцій: {{ recipe.servings }}
+
+        //- продукти з грамовкою — склад саме вашої порції (з рецепта чи без нього)
+        section.meal-dialog__block(v-if='portion')
+          h3 {{ meal.recipe_id ? 'Ваша порція' : 'Продукти' }}
+          ul.meal-dialog__lines
+            li(v-for='(p, i) in meal.products' :key='i')
+              span {{ p.name }}
+              b {{ amountOf(p) }}
 
         p.empty(v-if='loading') Відкриваємо рецепт…
         p.notice(v-else-if='loadError' role='alert')
@@ -72,7 +84,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           |
           button.btn.btn--soft.btn--sm(type='button' @click='load') Спробувати ще раз
         template(v-else-if='recipe')
-          section.meal-dialog__block
+          //- рецепт на кілька порцій: його склад показуємо, лише коли порцію не розписано
+          section.meal-dialog__block(v-if='!portion')
             h3 Інгредієнти
             p.empty(v-if='!recipe.lines.length') Склад не вказано.
             ul.meal-dialog__lines(v-else)
@@ -88,7 +101,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               li(v-for='(p, i) in steps' :key='i') {{ p }}
             p.meal-dialog__text(v-else) {{ steps[0] }}
             .tip(v-if='recipe.notes') #[b Примітка.] {{ recipe.notes }}
-        p.empty(v-else) Для цієї страви немає окремого рецепта. Якщо щось незрозуміло, запитайте Анастасію в чаті.
+        p.empty(v-else-if='!portion') Для цієї страви немає окремого рецепта. Якщо щось незрозуміло, запитайте Анастасію в чаті.
 
     .meal-dialog__foot
       button.btn(type='button' :class='meal.eaten ? "btn--ghost" : "btn--primary"' @click='emit("toggle")')

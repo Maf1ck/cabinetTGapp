@@ -6,7 +6,7 @@ import MealDialog from '@/components/MealDialog.vue'
 import MealReportModal from '@/components/MealReportModal.vue'
 import { getClientCard, getWeekMenu, setMealEaten, type Meal } from '@/api/client'
 import { addDays, DAY_SHORT, isoDate, shortDate, weekday, weekStart } from '@/lib/dates'
-import { hhmm, MEAL_LABEL, MEALS } from '@/lib/meals'
+import { hasOwnTitle, hhmm, MEAL_LABEL, MEALS, productsLine } from '@/lib/meals'
 
 const auth = useAuth()
 const clientId = auth.account!.clientId!
@@ -37,6 +37,9 @@ const range = computed(() => `${shortDate(monday.value)} — ${shortDate(addDays
 // Рядки таблиці: лише ті прийоми їжі, що є в меню
 const rows = computed(() => MEALS.filter((t) => meals.value?.some((m) => m.meal === t)))
 const cell = (day: number, meal: string) => meals.value?.find((m) => m.day === day && m.meal === meal)
+// клітинка тижня: назва страви (якщо вона не складена з продуктів) і продукти з грамовкою
+const cellOwnTitle = (m: Meal | undefined) => !!m && hasOwnTitle(m)
+const cellProducts = (m: Meal | undefined) => (m ? productsLine(m) : '')
 const dayMeals = computed(() => (meals.value ?? []).filter((m) => m.day === selectedDay.value))
 
 let cardLoaded = false
@@ -144,7 +147,9 @@ main.page.menu
                   :class='{ "menu__cell--today": d.today, "is-eaten": cell(d.day, t)?.eaten }'
                   @click='open(cell(d.day, t))'
                 )
-                  span {{ cell(d.day, t)?.title }}
+                  span.menu__cell-text
+                    span(v-if='cellOwnTitle(cell(d.day, t))') {{ cell(d.day, t)?.title }}
+                    span.products-line(v-if='cellProducts(cell(d.day, t))') {{ cellProducts(cell(d.day, t)) }}
                   AppIcon(v-if='cell(d.day, t)?.eaten' name='check' :size='16')
                 button.menu__mark(type='button' :class='{ "is-on": cell(d.day, t)?.eaten }' :aria-pressed='!!cell(d.day, t)?.eaten' @click='toggle(cell(d.day, t))')
                   AppIcon(name='check' :size='14')
@@ -171,7 +176,8 @@ main.page.menu
             img.menu__thumb(v-if='m.photoUrl' :src='m.photoUrl' alt='' loading='lazy' :title='m.photoCredit ? `Фото: ${m.photoCredit}` : undefined')
             span.menu__item-text
               span.menu__item-type {{ MEAL_LABEL[m.meal] }}{{ m.at_time ? ` · ${hhmm(m.at_time)}` : '' }}
-              b {{ m.title }}
+              b {{ hasOwnTitle(m) ? m.title : productsLine(m) }}
+              span.products-line(v-if='hasOwnTitle(m) && m.products.length') {{ productsLine(m) }}
             AppIcon(name='chevronRight' :size='18')
           button.menu__mark(type='button' :class='{ "is-on": m.eaten }' :aria-pressed='m.eaten' @click='toggle(m)')
             AppIcon(name='check' :size='14')
@@ -251,6 +257,13 @@ main.page.menu
     font-size: 13px;
     font-weight: 700;
     text-transform: uppercase;
+  }
+
+  &__cell-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
   }
 
   &__cell {

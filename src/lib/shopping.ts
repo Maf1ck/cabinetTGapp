@@ -53,36 +53,45 @@ const round = (n: number) => Math.round(n * 10) / 10
 /**
  * recipeIds — по одному на кожну страву меню (повтори = страва кілька разів на тиждень).
  * Рецепт на N порцій, що стоїть у меню M разів, готується ceil(M / N) разів.
+ * products — продукти з грамовкою з прийомів їжі (кожен рядок — одна порція, як вписала нутриціолог);
+ * страви, що мають продукти, сюди не передаються в recipeIds — їхній склад уже в products.
  */
-export function buildShoppingList(recipeIds: string[], recipes: Map<string, ShopRecipe>): ShopLine[] {
+export function buildShoppingList(
+  recipeIds: string[],
+  recipes: Map<string, ShopRecipe>,
+  products: ShopRecipe['lines'] = [],
+): ShopLine[] {
   const times = new Map<string, number>()
   for (const id of recipeIds) times.set(id, (times.get(id) ?? 0) + 1)
 
   type Acc = { name: string; category: string; byUnit: Map<string, { from: number; to: number }> }
   const acc = new Map<string, Acc>()
 
+  const add = (l: ShopRecipe['lines'][number], times: number) => {
+    const key = normalize(l.name)
+    const a = acc.get(key) ?? {
+      name: l.name,
+      category: l.category && (AISLES as readonly string[]).includes(l.category) ? l.category : OTHER_AISLE,
+      byUnit: new Map(),
+    }
+    if (l.qty_from !== null) {
+      const u = l.unit ?? ''
+      const q = a.byUnit.get(u) ?? { from: 0, to: 0 }
+      q.from += l.qty_from * times
+      q.to += (l.qty_to ?? l.qty_from) * times
+      a.byUnit.set(u, q)
+    }
+    acc.set(key, a)
+  }
+
   for (const [id, n] of times) {
     const r = recipes.get(id)
     if (!r) continue
     const s = servingsOf(r.servings)
     const batches = s ? Math.ceil(n / s) : n
-    for (const l of r.lines) {
-      const key = normalize(l.name)
-      const a = acc.get(key) ?? {
-        name: l.name,
-        category: l.category && (AISLES as readonly string[]).includes(l.category) ? l.category : OTHER_AISLE,
-        byUnit: new Map(),
-      }
-      if (l.qty_from !== null) {
-        const u = l.unit ?? ''
-        const q = a.byUnit.get(u) ?? { from: 0, to: 0 }
-        q.from += l.qty_from * batches
-        q.to += (l.qty_to ?? l.qty_from) * batches
-        a.byUnit.set(u, q)
-      }
-      acc.set(key, a)
-    }
+    for (const l of r.lines) add(l, batches)
   }
+  for (const p of products) add(p, 1)
 
   const order = (c: string) => {
     const i = (AISLES as readonly string[]).indexOf(c)

@@ -1,7 +1,7 @@
 // Дані робочого кабінету нутриціолога. RLS пускає is_nutri() до всіх клієнтів.
 import { supabase } from '@/lib/supabase'
 import { isoDate, weekday, weekStart } from '@/lib/dates'
-import type { MealType } from '@/lib/meals'
+import { productsOf, type MealProduct, type MealType } from '@/lib/meals'
 import { hasCheck, must, type Wellbeing } from './client'
 import { notify } from './notify'
 
@@ -262,6 +262,8 @@ export interface EditableMeal {
   at_time: string | null
   title: string
   recipe_id: string | null
+  /** продукти з грамовкою: «Гречка 60 г» */
+  products: MealProduct[]
   /** клієнт відмітив страву з'їденою */
   eaten: boolean
 }
@@ -276,7 +278,7 @@ export interface EditableMenu {
   hasDraft: boolean
 }
 
-const MEAL_FIELDS = 'id, day, meal, at_time, title, recipe_id'
+const MEAL_FIELDS = 'id, day, meal, at_time, title, recipe_id, products'
 
 /** Меню клієнта на тиждень разом із чернеткою (нутриціолог бачить і неопубліковані). */
 export async function getMenuForEdit(clientId: string, weekStart: string): Promise<EditableMenu | null> {
@@ -297,15 +299,15 @@ export async function getMenuForEdit(clientId: string, weekStart: string): Promi
       .order('day')
       .order('meal'),
   ) as (Omit<EditableMeal, 'eaten'> & { meal_checks: unknown })[]
-  const saved = rows.map(({ meal_checks, ...m }) => ({ ...m, eaten: hasCheck(meal_checks) }))
+  const saved = rows.map(({ meal_checks, ...m }) => ({ ...m, products: productsOf(m), eaten: hasCheck(meal_checks) }))
   const draft = must(
     await supabase().from('menu_drafts').select('meals').eq('menu_id', menu.id).maybeSingle(),
-  ) as { meals: Omit<EditableMeal, 'eaten'>[] } | null
+  ) as { meals: (Omit<EditableMeal, 'eaten' | 'products'> & { products?: MealProduct[] })[] } | null
   const eaten = new Set(saved.filter((m) => m.eaten).map((m) => m.id))
   return {
     ...menu,
     saved,
-    meals: draft ? draft.meals.map((m) => ({ ...m, eaten: eaten.has(m.id) })) : saved,
+    meals: draft ? draft.meals.map((m) => ({ ...m, products: productsOf(m), eaten: eaten.has(m.id) })) : saved,
     hasDraft: !!draft,
   }
 }
