@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'" />
+    <title>Немає зʼєднання</title>
+    <style>
+      /* кольори з src/scss/_variables.scss кабінету */
+      :root {
+        color-scheme: light;
+        --bg: #f6f9f5; /* $bg-app */
+        --text: #14261b; /* $text-heading */
+        --muted: #4a5e51; /* $text-muted */
+        --accent: #2e7d4f; /* $accent */
+      }
+      body {
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 16px/1.5 'Segoe UI', system-ui, sans-serif;
+        text-align: center;
+      }
+      main {
+        max-width: 360px;
+        padding: 24px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 24px;
+      }
+      p {
+        margin: 0 0 24px;
+        color: var(--muted);
+      }
+      a {
+        display: inline-block;
+        padding: 12px 24px;
+        border-radius: 999px;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 600;
+        text-decoration: none;
+      }
+      a:focus-visible {
+        outline: 3px solid var(--text);
+        outline-offset: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Немає зʼєднання</h1>
+      <p>Кабінет працює через інтернет. Перевірте підключення і спробуйте ще раз.</p>
+      <!-- main.js перехоплює цей перехід і знову відкриває кабінет -->
+      <a href="cabinet://retry">Спробувати ще раз</a>
+    </main>
+  </body>
+</html>

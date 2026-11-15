@@ -53,6 +53,24 @@ pnpm bot:dev   # бот локально, long polling
 ```
 `pnpm bot:dev` знімає вебхук, тож після нього на проді знову виконати `pnpm bot:setup <адреса>`.
 
+## Програма для Windows і Mac (адмінка)
+`desktop/` — Electron-оболонка, яка відкриває `/n` з Vercel в окремому вікні. Сайт оновлюється
+з деплоєм, тож оболонку перезбирати не треба (лише якщо змінився сам `desktop/main.js`).
+```sh
+cd desktop
+pnpm install
+pnpm start     # запустити (перший раз Electron сам завантажиться)
+pnpm dist      # інсталятор: desktop/release/Kabinet-Setup-<версія>.exe
+```
+- Windows-інсталятор пропонує папку `D:\Programs\cabinet-desktop`, якщо є диск D, інакше стандартну в AppData (`desktop/build/installer.nsh`).
+- Mac: DMG збирається лише на macOS, тому його збирає GitHub Actions (`.github/workflows/desktop-mac.yml`) при пуші змін у `desktop/` або вручну (Actions → «Desktop app for macOS» → Run workflow). Файл: сторінка запуску → Artifacts → `Kabinet-mac`. Один DMG для M1–M4 та Intel, підпис ad-hoc без Apple-сертифіката, тому під час першого запуску треба «Приватність і безпека» → «Усе одно відкрити».
+- Вхід як у браузері: «Увійти через Telegram» → підтвердити в боті. Посилання поза кабінетом
+  (бот, Telegram, Instagram) відкриваються в системі, не в програмі.
+- Без інтернету показується `offline.html` з кнопкою «Спробувати ще раз».
+- Інсталятор не підписаний: Windows SmartScreen попередить «Невідомий видавець» → «Докладніше» → «Усе одно запустити».
+- Перевірка без побічних дій: `CABINET_SMOKE_MS=8000 pnpm start` (зовнішні посилання лише в лог);
+  `CABINET_URL=<адреса>` — відкрити інший кабінет (напр. локальний).
+
 ## API (Vercel-функції)
 
 | Маршрут | Що робить |

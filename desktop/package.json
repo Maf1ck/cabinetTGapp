@@ -1,0 +1,57 @@
+{
+  "name": "cabinet-desktop",
+  "productName": "Кабінет нутриціолога",
+  "version": "1.0.0",
+  "description": "Кабінет нутриціолога для Windows",
+  "private": true,
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis",
+    "dist:mac": "electron-builder --mac dmg --universal"
+  },
+  "build": {
+    "appId": "ua.nknutrition.cabinet",
+    "productName": "Кабінет нутриціолога",
+    "artifactName": "Kabinet-Setup-${version}.${ext}",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "offline.html",
+      "build/icon.png"
+    ],
+    "win": {
+      "icon": "build/icon.png",
+      "target": "nsis"
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.healthcare-fitness",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "artifactName": "Kabinet-${version}-mac.${ext}"
+    },
+    "dmg": {
+      "title": "Кабінет нутриціолога"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "include": "build/installer.nsh",
+      "installerLanguages": ["uk_UA"],
+      "language": "1058",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Кабінет нутриціолога"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.3.2",
+    "electron-builder": "^26.18.0"
+  }
+}

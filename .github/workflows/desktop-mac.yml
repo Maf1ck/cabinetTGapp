@@ -1,0 +1,50 @@
+# macOS build of the desktop app (desktop/). A DMG can only be built on a Mac,
+# so it runs on a GitHub macOS runner. Result: Actions → this run → Artifacts → Kabinet-mac.
+name: Desktop app for macOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-mac.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-mac-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dmg:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      # universal = one DMG for both Apple Silicon (M1–M4) and Intel Macs; ad-hoc signed
+      - run: pnpm dist:mac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kabinet-mac
+          path: desktop/release/*.dmg
+          if-no-files-found: error
+          retention-days: 30
