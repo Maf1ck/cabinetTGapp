@@ -177,6 +177,20 @@ describe('конструктор меню: склад рецепта з грам
     })
   })
 
+  it("загальна вага порції: вписали іншу — інгредієнти перерахувались пропорційно", async () => {
+    const w = await mountBuilder()
+    await w.find("button.builder__cell").trigger("click")
+    await w.findAll(".builder__list button").find((b) => b.text().includes("Гречка з грибами"))!.trigger("click")
+    await flushPromises()
+    const total = w.find<HTMLInputElement>(".meal-products__weight")
+    // 60 г + 100 г, сіль «за смаком» не рахується
+    expect(total.element.value).toBe("160")
+    await total.setValue("320")
+    await total.trigger("change")
+    expect(w.findAll<HTMLInputElement>(".meal-products__qty").map((i) => i.element.value)).toEqual(["120", "200", ""])
+    expect(total.element.value).toBe("320")
+  })
+
   it('у «Гарнір» спершу прості крупи; страву з продуктів можна зберегти як рецепт', async () => {
     recipes.saveRecipe.mockImplementation(async (draft) => ({
       ...buckwheatWithMushrooms,

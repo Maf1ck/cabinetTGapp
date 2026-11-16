@@ -5,6 +5,7 @@ import AppIcon from './AppIcon.vue'
 import { getRecipe, type Recipe } from '@/api/recipes'
 import type { Meal } from '@/api/client'
 import { hhmm, MEAL_LABEL, type MealProduct } from '@/lib/meals'
+import { portionWeight } from '@/lib/products'
 
 // needsReport: клієнт на супроводі, «зʼїдено» ставиться лише зі звітом
 const props = defineProps<{ meal: Meal; needsReport?: boolean }>()
@@ -23,6 +24,8 @@ const toggleLabel = computed(() => {
 const amountOf = (p: MealProduct) => (p.qty === null ? '' : p.unit ? `${p.qty} ${p.unit}` : String(p.qty))
 /** нутриціолог розписала склад порції з грамовкою */
 const portion = computed(() => props.meal.products.length > 0)
+/** загальна вага порції (грами й мілілітри), 0 — не показуємо */
+const weight = computed(() => portionWeight(props.meal.products))
 const steps = computed(() => (recipe.value?.instructions ?? '').split(/\n+/).filter((p) => p.trim()))
 
 async function load() {
@@ -72,7 +75,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
         //- продукти з грамовкою — склад саме вашої порції (з рецепта чи без нього)
         section.meal-dialog__block(v-if='portion')
-          h3 {{ meal.recipe_id ? 'Ваша порція' : 'Продукти' }}
+          h3 {{ meal.recipe_id ? 'Ваша порція' : 'Продукти' }}{{ weight ? ` · ${weight} г` : '' }}
           ul.meal-dialog__lines
             li(v-for='(p, i) in meal.products' :key='i')
               span {{ p.name }}

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 // Продукти прийому їжі з грамовкою в конструкторі меню: «Гречка — 60 г».
 // Додаються з довідника (вкладка «Продукти» в конструкторі) або вручну.
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { PRODUCTS_MAX, type MealProduct } from '@/lib/meals'
-import { customProduct, parseQty, PRODUCT_UNITS } from '@/lib/products'
+import { customProduct, hasUnweighed, parseQty, portionWeight, PRODUCT_UNITS, scaleToWeight } from '@/lib/products'
 
 const model = defineModel<MealProduct[]>({ required: true })
 
@@ -37,6 +37,19 @@ async function addCustom() {
   model.value = [...model.value, customProduct()]
   await nextTick()
   nameInputs.value[model.value.length - 1]?.focus()
+}
+
+// ---------------------------------------------------------------- загальна вага порції
+const total = computed(() => portionWeight(model.value))
+const unweighed = computed(() => hasUnweighed(model.value))
+
+/** Вписали іншу вагу (Enter або вийшли з поля) — грамовки перераховуються пропорційно */
+function onTotal(e: Event) {
+  const input = e.target as HTMLInputElement
+  const target = parseQty(input.value)
+  if (target && target !== total.value) model.value = scaleToWeight(model.value, target)
+  // показуємо фактичну суму після округлення
+  input.value = String(total.value)
 }
 
 defineExpose({ focusQty })
@@ -75,6 +88,19 @@ section.meal-products(aria-label='Продукти з грамовкою')
           option(v-for='u in unitsFor(p)' :key='u' :value='u') {{ u }}
       button.meal-products__remove(type='button' :aria-label='`Прибрати: ${p.name || "продукт"}`' @click='remove(i)')
         AppIcon(name='close' :size='16')
+  //- загальна вага: змінили — інгредієнти перераховуються пропорційно
+  .meal-products__total(v-if='total > 0')
+    label(for='meal-products-total') Загальна вага порції
+    .meal-products__total-field
+      input#meal-products-total.meal-products__weight(
+        :value='total'
+        type='text'
+        inputmode='decimal'
+        @change='onTotal'
+        @keydown.enter.prevent='onTotal'
+      )
+      span г
+    small {{ unweighed ? 'Змініть — грами й мілілітри перерахуються пропорційно, штуки лишаться.' : 'Змініть — усі інгредієнти перерахуються пропорційно.' }}
 </template>
 
 <style lang="scss">
@@ -127,7 +153,8 @@ section.meal-products(aria-label='Продукти з грамовкою')
 
   &__name,
   &__qty,
-  &__unit {
+  &__unit,
+  &__weight {
     min-height: 40px;
     border: 1px solid $line-green;
     border-radius: 10px;
@@ -164,6 +191,44 @@ section.meal-products(aria-label='Продукти з грамовкою')
   &__unit {
     width: 64px;
     padding: 8px 4px;
+  }
+
+  &__total {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    padding: 10px 12px;
+    border-radius: $radius-item;
+    background: $bg-active;
+    color: $text-active;
+
+    label {
+      flex: 1 1 auto;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    small {
+      flex-basis: 100%;
+      color: $text-muted;
+      font-size: 12px;
+    }
+  }
+
+  &__total-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    font-weight: 700;
+
+    .meal-products__weight {
+      padding: 8px;
+      text-align: right;
+      width: 76px;
+      font-weight: 700;
+    }
   }
 
   &__remove {

@@ -3,14 +3,17 @@ import type { Ingredient, RecipeLine } from '@/api/recipes'
 import type { MealProduct } from '@/lib/meals'
 import {
   cleanProducts,
+  hasUnweighed,
   isGarnishCategory,
   parseQty,
   plainGarnishes,
+  portionWeight,
   portionFromRecipe,
   productCategories,
   productFromIngredient,
   recipeFromProducts,
   roundQty,
+  scaleToWeight,
   searchProducts,
   switchRecipeProducts,
 } from '@/lib/products'
@@ -142,5 +145,36 @@ describe('склад рецепта на одну порцію', () => {
     expect(plainGarnishes(list).map((i) => i.name)).toEqual(['Гречка', 'Картопля', 'Макарони з твердих сортів пшениці', 'Рис'])
     expect(isGarnishCategory('Гарніри')).toBe(true)
     expect(isGarnishCategory('Сніданок')).toBe(false)
+  })
+})
+
+describe("загальна вага порції", () => {
+  const meal: MealProduct[] = [
+    { ingredient_id: null, name: "Гречка", qty: 60, unit: "г", category: null },
+    { ingredient_id: null, name: "Огірок", qty: 150, unit: "г", category: null },
+    { ingredient_id: null, name: "Олія оливкова", qty: 5, unit: "мл", category: null },
+    { ingredient_id: null, name: "Яйце", qty: 2, unit: "шт", category: null },
+    { ingredient_id: null, name: "Сіль", qty: null, unit: "г", category: null },
+  ]
+
+  it("рахує грами й мілілітри; штуки й «за смаком» — ні", () => {
+    expect(portionWeight(meal)).toBe(215)
+    expect(hasUnweighed(meal)).toBe(true)
+    expect(portionWeight([])).toBe(0)
+  })
+
+  it("інша вага — грами й мілілітри пропорційно, штуки й «за смаком» як були", () => {
+    const scaled = scaleToWeight(meal, 430)
+    expect(scaled.map((p) => p.qty)).toEqual([120, 300, 10, 2, null])
+    expect(portionWeight(scaled)).toBe(430)
+    // округлення не з’їдає грами: різниця йде найбільшому інгредієнту
+    const odd = scaleToWeight([
+      { ingredient_id: null, name: "Гречка", qty: 50, unit: "г", category: null },
+      { ingredient_id: null, name: "Масло", qty: 5, unit: "г", category: null },
+      { ingredient_id: null, name: "Огірок", qty: 150, unit: "г", category: null },
+    ], 500)
+    expect(portionWeight(odd)).toBe(500)
+    // нуль чи сміття — нічого не міняємо
+    expect(scaleToWeight(meal, 0)).toBe(meal)
   })
 })

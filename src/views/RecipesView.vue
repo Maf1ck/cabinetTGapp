@@ -59,6 +59,7 @@ const shown = computed(() => {
 
 const counts = computed(() => {
   const n = recipes.value.length
+  if (!canEdit.value) return `Страви з ваших меню · ${n} ${plural(n, 'рецепт', 'рецепти', 'рецептів')}`
   return `${n} ${plural(n, 'рецепт', 'рецепти', 'рецептів')} · ${categories.value.length} ${plural(categories.value.length, 'категорія', 'категорії', 'категорій')}`
 })
 
@@ -86,7 +87,11 @@ async function loadRecipe(id: string) {
   recipeError.value = ''
   try {
     recipe.value = await getRecipe(id)
-    if (!recipe.value) recipeError.value = 'Рецепт не знайдено — можливо, його видалили.'
+    // клієнт бачить лише рецепти зі своїх меню (RLS), тож «не знайдено» для нього — інше
+    if (!recipe.value)
+      recipeError.value = canEdit.value
+        ? 'Рецепт не знайдено — можливо, його видалили.'
+        : 'Цього рецепта немає у ваших меню.'
   } catch {
     recipeError.value = 'Не вдалося відкрити рецепт.'
   } finally {
@@ -330,7 +335,7 @@ main.page.recipes
           :aria-pressed='category === c.name'
           @click='category = category === c.name ? null : c.name'
         ) {{ c.name }} #[span {{ c.count }}]
-      p.empty(v-if='!recipes.length') {{ canEdit ? 'Рецептів поки немає. Додайте перший.' : 'Рецептів поки немає.' }}
+      p.empty(v-if='!recipes.length') {{ canEdit ? 'Рецептів поки немає. Додайте перший.' : 'Тут зʼявляться рецепти страв із вашого меню.' }}
       p.empty(v-else-if='!shown.length') Нічого не знайдено.
       .recipes__items
         RouterLink.recipes__item(v-for='r in shown' :key='r.id' :to='`${base}/${r.id}`' :class='{ "is-on": r.id === selectedId }')

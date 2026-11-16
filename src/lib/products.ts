@@ -38,7 +38,36 @@ export function roundQty(n: number, unit: string | null): number {
   return n >= 10 ? Math.round(n) : Math.round(n * 10) / 10
 }
 
-type RecipeForPortion = Pick<Recipe, 'servings' | 'lines'>
+// ---------------------------------------------------------------- загальна вага порції
+
+/** Що входить у вагу: грами й мілілітри (мл ≈ г для страви); штуки й «за смаком» — ні */
+const WEIGHT_UNITS = ['г', 'мл']
+const weighed = (p: MealProduct) => p.qty !== null && !!p.unit && WEIGHT_UNITS.includes(p.unit)
+
+/** Загальна вага порції, г */
+export const portionWeight = (list: MealProduct[]) => Math.round(list.filter(weighed).reduce((s, p) => s + (p.qty ?? 0), 0))
+
+/** Є продукти, які у вагу не входять (штуки) — показуємо підказку */
+export const hasUnweighed = (list: MealProduct[]) => list.some((p) => p.qty !== null && !weighed(p))
+
+/**
+ * Задали іншу загальну вагу — грами й мілілітри перераховуються пропорційно,
+ * штуки та «за смаком» лишаються як є.
+ */
+export function scaleToWeight(list: MealProduct[], target: number): MealProduct[] {
+  const total = portionWeight(list)
+  if (!total || !(target > 0)) return list
+  const k = target / total
+  const scaled = list.map((p) => (weighed(p) ? { ...p, qty: Math.min(roundQty((p.qty ?? 0) * k, p.unit), QTY_MAX) } : p))
+  // різницю від округлення віддаємо найбільшому інгредієнту — сума точно дорівнює вписаній вазі
+  const diff = Math.round(target) - portionWeight(scaled)
+  const biggest = scaled.reduce<number>((at, p, i) => (weighed(p) && (at < 0 || (p.qty ?? 0) > (scaled[at]!.qty ?? 0)) ? i : at), -1)
+  const big = scaled[biggest]
+  if (diff && big && (big.qty ?? 0) + diff > 0) scaled[biggest] = { ...big, qty: Math.round(((big.qty ?? 0) + diff) * 10) / 10 }
+  return scaled
+}
+
+type RecipeForPortion =Pick<Recipe, 'servings' | 'lines'>
 
 /**
  * Склад однієї порції за рецептом — стартові грамовки, які нутриціолог править під клієнта.
